@@ -1,29 +1,59 @@
 /**
- * Media Optimization Utility for High Performance Web Assets
- * - Dynamic CDN image transformations (Cloudinary, Unsplash, Google CDN)
- * - Fast client-side canvas compression to WebP before uploading
+ * Enterprise Media Optimization Utility
+ * - Cloudinary & Unsplash CDN on-the-fly transformations (f_auto, q_auto, w_xxx, dpr_auto)
+ * - Responsive srcSet and sizes generator
+ * - Low-Quality Image Placeholders (LQIP blur-up)
+ * - Client-side HTML5 Canvas WebP image compression
  * - Privacy and performance-optimized video embed URLs
  */
 
+const DEFAULT_WIDTHS = [360, 640, 960, 1200, 1600];
+
 /**
- * Optimizes remote image URLs with CDN query parameters for WebP, auto-compression, and responsive width
+ * Optimizes an image URL with CDN transformations (format, quality, width, crop, blur)
  * @param {string} url - Original image URL
- * @param {object} options - Optimization parameters { width, quality, format }
- * @returns {string} - Optimized URL
+ * @param {object} options - Transformation options
+ * @returns {string} - Optimized CDN URL
  */
-export function optimizeImageUrl(url, { width = 1200, quality = 80, format = 'webp' } = {}) {
+export function optimizeImageUrl(url, {
+  width,
+  height,
+  quality = 'auto:good',
+  format = 'auto',
+  crop = 'limit',
+  blur = 0,
+  dpr = 'auto'
+} = {}) {
   if (!url || typeof url !== 'string') return '';
 
-  // Skip base64, blobs, and SVG
-  if (url.startsWith('data:') || url.startsWith('blob:') || url.endsWith('.svg')) {
+  // Skip base64, blobs, SVG vectors, and local assets
+  if (url.startsWith('data:') || url.startsWith('blob:') || url.endsWith('.svg') || url.startsWith('/')) {
     return url;
   }
 
   // 1. Cloudinary CDN Transformation
   if (url.includes('res.cloudinary.com')) {
-    if (url.includes('/upload/') && !url.includes('/upload/f_') && !url.includes('/upload/w_') && !url.includes('/upload/c_')) {
-      const transform = `f_auto,q_auto:good,w_${width},c_limit`;
-      return url.replace('/upload/', `/upload/${transform}/`);
+    const uploadIndex = url.indexOf('/upload/');
+    if (uploadIndex !== -1) {
+      const prefix = url.substring(0, uploadIndex + 8);
+      let suffix = url.substring(uploadIndex + 8);
+
+      // Extract existing transformation if present (e.g. /upload/v12345/ or /upload/f_auto,w_800/v12345/)
+      let versionAndPath = suffix;
+      const firstSegment = suffix.split('/')[0];
+      if (firstSegment && !firstSegment.startsWith('v') && !firstSegment.includes('.')) {
+        // First segment is already a transformation, replace it
+        versionAndPath = suffix.substring(firstSegment.length + 1);
+      }
+
+      const transforms = [`f_${format}`, `q_${quality}`];
+      if (dpr) transforms.push(`dpr_${dpr}`);
+      if (width) transforms.push(`w_${Math.round(width)}`);
+      if (height) transforms.push(`h_${Math.round(height)}`);
+      if (crop && (width || height)) transforms.push(`c_${crop}`);
+      if (blur > 0) transforms.push(`e_blur:${Math.round(blur)}`);
+
+      return `${prefix}${transforms.join(',')}/${versionAndPath}`;
     }
     return url;
   }
@@ -34,26 +64,75 @@ export function optimizeImageUrl(url, { width = 1200, quality = 80, format = 'we
       const urlObj = new URL(url);
       urlObj.searchParams.set('auto', 'format');
       urlObj.searchParams.set('fit', 'crop');
-      urlObj.searchParams.set('fm', format);
-      urlObj.searchParams.set('q', String(quality));
-      if (width) urlObj.searchParams.set('w', String(width));
+      urlObj.searchParams.set('fm', format === 'auto' ? 'webp' : format);
+      urlObj.searchParams.set('q', quality.includes('auto') ? '80' : String(quality));
+      if (width) urlObj.searchParams.set('w', String(Math.round(width)));
+      if (height) urlObj.searchParams.set('h', String(Math.round(height)));
+      if (blur > 0) urlObj.searchParams.set('blur', String(Math.min(100, blur)));
       return urlObj.toString();
     } catch {
       return url;
     }
   }
 
-  // 3. Google CDN Photos / Avatars
+  // 3. Google User Content / Photos CDN
   if (url.includes('googleusercontent.com')) {
-    return url.replace(/=s\d+[^?]*$/i, `=s${width}-rw`).replace(/=w\d+[^?]*$/i, `=w${width}-rw`);
+    let cleanUrl = url.replace(/=(?:s|w|h)\d+[^?]*$/i, '');
+    if (width) {
+      return `${cleanUrl}=w${Math.round(width)}-rw`;
+    }
+    return `${cleanUrl}=rw`;
   }
 
   return url;
 }
 
 /**
- * Compresses an image file on the client using HTML5 Canvas before upload
- * Reduces upload time from seconds to milliseconds and cuts payload size by 70-90%
+ * Generates responsive srcSet for CDN images across standard viewport breakpoints
+ * @param {string} url - Original image URL
+ * @param {number[]} widths - Array of target widths in px
+ * @param {object} options - Optimization parameters
+ * @returns {string|undefined} - srcSet string e.g. "url1 360w, url2 640w..."
+ */
+export function generateSrcSet(url, widths = DEFAULT_WIDTHS, options = {}) {
+  if (!url || typeof url !== 'string') return undefined;
+
+  // Only generate srcSet for scalable remote CDN assets
+  if (!url.includes('res.cloudinary.com') && !url.includes('images.unsplash.com') && !url.includes('googleusercontent.com')) {
+    return undefined;
+  }
+
+  return widths
+    .map((w) => {
+      const optimized = optimizeImageUrl(url, { ...options, width: w });
+      return `${optimized} ${w}w`;
+    })
+    .join(', ');
+}
+
+/**
+ * Generates a tiny blurred placeholder for progressive blur-up loading (LQIP)
+ * @param {string} url - Original image URL
+ * @returns {string} - Low-quality placeholder URL
+ */
+export function getLowQualityPlaceholder(url) {
+  if (!url || typeof url !== 'string') return '';
+  if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('/')) return url;
+
+  if (url.includes('res.cloudinary.com')) {
+    return optimizeImageUrl(url, { width: 30, quality: '10', blur: 300, format: 'auto' });
+  }
+
+  if (url.includes('images.unsplash.com')) {
+    return optimizeImageUrl(url, { width: 30, quality: '10', blur: 50, format: 'webp' });
+  }
+
+  return optimizeImageUrl(url, { width: 40 });
+}
+
+/**
+ * Client-side HTML5 Canvas WebP image compressor before upload
+ * Resizes large photos to optimal dimensions & converts to WebP, saving 80-90% bandwidth
  * @param {File} file - Browser File object
  * @param {object} options - { maxWidth, maxHeight, quality }
  * @returns {Promise<{ base64: string, blob: Blob, width: number, height: number }>}
@@ -66,7 +145,7 @@ export async function compressImageFile(
     throw new Error('Tệp không phải là hình ảnh');
   }
 
-  // For GIFs or SVGs, skip canvas compression to preserve animation / vector quality
+  // Preserve animations for GIFs and vector for SVGs
   if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -85,7 +164,6 @@ export async function compressImageFile(
       img.onload = () => {
         let { width, height } = img;
 
-        // Calculate aspect ratio bounded by maxWidth & maxHeight
         if (width > maxWidth || height > maxHeight) {
           const ratio = Math.min(maxWidth / width, maxHeight / height);
           width = Math.round(width * ratio);
@@ -102,12 +180,10 @@ export async function compressImageFile(
           return;
         }
 
-        // High quality image smoothing
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Try WebP first for optimal compression
         let base64 = canvas.toDataURL('image/webp', quality);
         if (!base64.startsWith('data:image/webp')) {
           base64 = canvas.toDataURL('image/jpeg', quality);
@@ -134,29 +210,25 @@ export async function compressImageFile(
 
 /**
  * Normalizes video URLs to lightweight, fast-loading privacy-enhanced embed URLs
- * @param {string} url - YouTube / Vimeo URL or embed code
+ * @param {string} url - YouTube / Vimeo URL or iframe embed snippet
  * @returns {string} - Fast embed URL
  */
 export function formatVideoEmbedUrl(url) {
   if (!url) return '';
   let cleanUrl = String(url).trim();
 
-  // Extract from iframe tag if pasted full iframe code
   const iframeMatch = cleanUrl.match(/src=["']([^"']+)["']/i);
   if (iframeMatch) {
     cleanUrl = iframeMatch[1];
   }
 
-  // YouTube match (including shorts, live, standard watch, youtu.be)
   const ytMatch = cleanUrl.match(
     /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/i
   );
   if (ytMatch && ytMatch[1]) {
-    // Use youtube-nocookie.com for lower tracking overhead & faster load
     return `https://www.youtube-nocookie.com/embed/${ytMatch[1]}?autoplay=0&rel=0&modestbranding=1&playsinline=1`;
   }
 
-  // Vimeo match
   const vimeoMatch = cleanUrl.match(
     /(?:vimeo\.com\/(?:video\/|channels\/[\w-]+\/|groups\/[^\/]*\/videos\/|album\/\d+\/video\/|))(\d+)/i
   );

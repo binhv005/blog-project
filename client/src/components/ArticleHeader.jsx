@@ -1,28 +1,26 @@
 import React from 'react';
 import { useBlog } from '../context/BlogContext';
-import { optimizeImageUrl } from '../utils/mediaOptimizer';
+import OptimizedImage from './common/OptimizedImage';
 
 export default function ArticleHeader() {
   const { activePost } = useBlog();
 
   if (!activePost) return null;
 
-  const optimizedCover = optimizeImageUrl(activePost.coverImage, { width: 1200, quality: 85 });
-
   return (
     <div className="mb-6">
       {/* Featured Hero Cover Image at Top */}
       {activePost.coverImage && (
         <div className="relative w-full rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl dark:shadow-2xl group mb-6">
-          <img
+          <OptimizedImage
+            src={activePost.coverImage}
             alt={activePost.title}
+            priority={true}
+            sizes="(max-width: 1200px) 100vw, 1200px"
+            containerClassName="w-full max-h-[480px]"
             className="w-full max-h-[480px] object-cover object-center transform transition-transform duration-700 ease-out group-hover:scale-[1.01]"
-            src={optimizedCover}
-            loading="eager"
-            fetchPriority="high"
-            decoding="async"
           />
-          <div className="absolute inset-0 ring-1 ring-inset ring-black/5 dark:ring-white/10 rounded-2xl pointer-events-none" />
+          <div className="absolute inset-0 ring-1 ring-inset ring-black/5 dark:ring-white/10 rounded-2xl pointer-events-none z-10" />
         </div>
       )}
 

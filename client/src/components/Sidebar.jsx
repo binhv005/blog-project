@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useBlog } from '../context/BlogContext';
 import { optimizeImageUrl } from '../utils/mediaOptimizer';
+import OptimizedImage from './common/OptimizedImage';
 import ConsultationModal from './ConsultationModal';
 
 const categoryColorMap = {
@@ -65,11 +66,13 @@ export default function Sidebar() {
                 className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-all group cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-white/5" 
               >
                 <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 flex-shrink-0 shadow-sm">
-                  <img 
-                    src={optimizeImageUrl(post.coverImage || 'https://images.unsplash.com/photo-1518770660439-4636190af475', { width: 140, quality: 75 })} 
+                  <OptimizedImage 
+                    src={post.coverImage} 
                     alt={post.title} 
-                    loading="lazy"
-                    decoding="async"
+                    width={56}
+                    height={56}
+                    sizes="56px"
+                    containerClassName="w-full h-full"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
                 </div>

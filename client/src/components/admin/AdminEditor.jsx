@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useBlog } from '../../context/BlogContext';
 import { useToast } from '../../context/ToastContext';
 import { compressImageFile, optimizeImageUrl, formatVideoEmbedUrl } from '../../utils/mediaOptimizer';
+import OptimizedImage from '../common/OptimizedImage';
 
 // Helper to convert legacy Markdown to HTML for initial block load
 function mdToHtml(str) {
@@ -306,9 +307,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   const [isItalicActive, setIsItalicActive] = useState(false);
   const [isUnderlineActive, setIsUnderlineActive] = useState(false);
   const [isStrikethroughActive, setIsStrikethroughActive] = useState(false);
-  const [activeTextColor, setActiveTextColor] = useState('#ff5167');
-  const [showColorPicker, setShowColorPicker] = useState(false);
-  const [isHighlightActive, setIsHighlightActive] = useState(false);
+  const [selectedFontSize, setSelectedFontSize] = useState('16');
   const [textAlign, setTextAlign] = useState('left'); // 'left' | 'center' | 'right'
   const [isBulletListActive, setIsBulletListActive] = useState(false);
   const [isNumberedListActive, setIsNumberedListActive] = useState(false);
@@ -362,11 +361,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       setIsUnderlineActive(underline);
       setIsStrikethroughActive(strike);
 
-      if (color && color !== 'inherit' && color !== 'rgb(241, 234, 255)') {
-        setActiveTextColor(color);
-      }
-
-      // Check alignment, link & heading format of current selection / caret
+      // Check font size, alignment, link & heading format of current selection / caret
       const selection = window.getSelection();
       let currentAlign = 'left';
       let detectedFormat = null;
@@ -376,6 +371,17 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         let node = selection.anchorNode;
         if (node && node.nodeType === Node.TEXT_NODE) {
           node = node.parentElement;
+        }
+        if (node && window.getComputedStyle) {
+          try {
+            const computed = window.getComputedStyle(node);
+            if (computed && computed.fontSize) {
+              const parsed = Math.round(parseFloat(computed.fontSize));
+              if (parsed && parsed >= 8 && parsed <= 120) {
+                setSelectedFontSize(String(parsed));
+              }
+            }
+          } catch (_) {}
         }
         while (node && node.getAttribute && !node.getAttribute('contenteditable')) {
           const styleAlign = node.style?.textAlign;
@@ -682,26 +688,50 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     pushHistory(updated);
   };
 
-  const handleHighlightToggle = () => {
-    if (isHighlightActive) {
-      document.execCommand('hiliteColor', false, 'transparent');
-      setIsHighlightActive(false);
+  const FONT_SIZES = [9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 48, 60, 72];
+
+  const applyFontSize = (sizePx) => {
+    const size = parseInt(sizePx, 10);
+    if (isNaN(size) || size < 8 || size > 120) return;
+    setSelectedFontSize(String(size));
+
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+      const range = selection.getRangeAt(0);
+
+      const span = document.createElement('span');
+      span.style.fontSize = `${size}px`;
+      span.style.lineHeight = '1.35';
+
+      try {
+        span.appendChild(range.extractContents());
+        range.insertNode(span);
+        const newRange = document.createRange();
+        newRange.selectNodeContents(span);
+        selection.removeAllRanges();
+        selection.addRange(newRange);
+      } catch (_) {
+        document.execCommand('fontSize', false, '3');
+      }
+
+      updateToolbarActiveStates();
+      const updated = syncActiveBlockContent();
+      pushHistory(updated);
     } else {
-      document.execCommand('hiliteColor', false, 'rgba(76, 215, 246, 0.35)');
-      setIsHighlightActive(true);
+      toast.info('Vui lòng bôi đen (tô đen) đoạn chữ cần đổi cỡ chữ');
     }
-    updateToolbarActiveStates();
-    const updated = syncActiveBlockContent();
-    pushHistory(updated);
   };
 
-  const handleColorApply = (color) => {
-    setActiveTextColor(color);
-    setShowColorPicker(false);
-    document.execCommand('foreColor', false, color);
-    updateToolbarActiveStates();
-    const updated = syncActiveBlockContent();
-    pushHistory(updated);
+  const handleIncreaseFontSize = () => {
+    const current = parseInt(selectedFontSize, 10) || 16;
+    const next = FONT_SIZES.find((s) => s > current) || (current + 2);
+    applyFontSize(next);
+  };
+
+  const handleDecreaseFontSize = () => {
+    const current = parseInt(selectedFontSize, 10) || 16;
+    const prev = [...FONT_SIZES].reverse().find((s) => s < current) || Math.max(9, current - 2);
+    applyFontSize(prev);
   };
 
   // Alignment formatting (Apply strictly to the highlighted selection and record to history)
@@ -974,17 +1004,64 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     }
   };
 
-  const handleInsertTable = (idx = getActiveIndex()) => {
-    insertBlockAt(idx, {
-      id: `tbl-${Date.now()}`,
-      type: 'table',
-      headers: ['Thành phần', 'Độ trễ', 'Trạng thái'],
-      rows: [
-        ['API Gateway', '12ms', 'Tối ưu'],
-        ['Redis Cache', '2ms', 'Hoạt động tốt'],
-        ['Database Node', '28ms', 'Ổn định']
-      ]
-    });
+  // Insert table directly into text/paragraph at current cursor position
+  const insertTableAtCursor = (
+    headers = ['Thành phần', 'Độ trễ', 'Trạng thái'],
+    rows = [
+      ['API Gateway', '12ms', 'Tối ưu'],
+      ['Redis Cache', '2ms', 'Hoạt động tốt'],
+      ['Database Node', '28ms', 'Ổn định']
+    ]
+  ) => {
+    const tableHtml = `<div class="my-6 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/40 bg-white dark:bg-[#151025] shadow-xl not-prose block" contenteditable="false"><div class="overflow-x-auto"><table class="w-full text-left text-sm border-collapse min-w-[360px]"><thead class="bg-slate-100 dark:bg-[#1f1733] border-b border-slate-200 dark:border-white/10 text-rose-600 dark:text-[#ff8a9e] font-bold"><tr>${headers.map(h => `<th class="p-3 border border-slate-200 dark:border-white/10" contenteditable="true">${h}</th>`).join('')}</tr></thead><tbody class="divide-y divide-slate-200 dark:divide-white/5 text-slate-800 dark:text-slate-200">${rows.map(r => `<tr>${r.map(c => `<td class="p-3 border border-slate-200 dark:border-white/10" contenteditable="true">${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div></div><p><br></p>`;
+
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0 && focusedBlockId) {
+      try {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = tableHtml;
+        const frag = document.createDocumentFragment();
+        let lastNode = null;
+        while (tempDiv.firstChild) {
+          lastNode = tempDiv.firstChild;
+          frag.appendChild(lastNode);
+        }
+        range.insertNode(frag);
+
+        const newRange = document.createRange();
+        if (lastNode) {
+          newRange.setStartAfter(lastNode);
+          newRange.collapse(true);
+        }
+        selection.removeAllRanges();
+        selection.addRange(newRange);
+
+        syncActiveBlockContent();
+        pushHistory(blocks);
+        return;
+      } catch (_) { }
+    }
+
+    const activeIdx = getActiveIndex();
+    const currentBlock = blocks[activeIdx];
+    if (currentBlock && currentBlock.type === 'paragraph') {
+      const newText = (currentBlock.text || '') + tableHtml;
+      updateBlock(currentBlock.id, { text: newText });
+    } else {
+      insertBlockAt(activeIdx, {
+        id: `tbl-${Date.now()}`,
+        type: 'table',
+        headers,
+        rows
+      });
+    }
+    pushHistory(blocks);
+  };
+
+  const handleInsertTable = () => {
+    insertTableAtCursor();
   };
 
   const handleInsertLink = () => {
@@ -1222,7 +1299,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       });
       let uploadedUrl = base64Data;
 
-      // 2. Attempt upload to backend API (handles Cloudinary on server)
+      // 2. Upload to Cloudinary via backend API
       let uploadSuccess = false;
       try {
         const apiRes = await fetch('/api/upload', {
@@ -1242,12 +1319,12 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
           }
         }
       } catch (err) {
-        // Backend API offline or error, try direct Cloudinary upload below
+        console.warn('Backend upload offline:', err);
       }
 
       // 3. Direct Cloudinary upload fallback if server API was not reached
       if (!uploadSuccess) {
-        const cloudName = 'dq0w6ycvk';
+        const cloudName = 'ai1z2oaj';
         const uploadPreset = 'dudi_blog_preset';
 
         if (cloudName && uploadPreset && uploadPreset !== 'YOUR_UPLOAD_PRESET') {
@@ -1266,6 +1343,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
               const data = await res.json();
               if (data.secure_url) {
                 uploadedUrl = data.secure_url;
+                uploadSuccess = true;
               }
             }
           } catch (cloudErr) {
@@ -1666,46 +1744,29 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
               <div className="h-4 w-px bg-slate-300 dark:bg-[#352f44] mx-0.5"></div>
 
-              {/* Text Color Button with Popover */}
-              <div className="relative">
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => setShowColorPicker(!showColorPicker)}
-                  className="h-7 px-1.5 flex items-center gap-0.5 rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835] transition-all"
-                  title="Chọn màu chữ cho văn bản"
-                  type="button"
+              {/* Word-like Font Size Dropdown */}
+              <div className="relative inline-flex items-center bg-slate-100 dark:bg-[#251d36] rounded-lg border border-slate-200 dark:border-[#3d3353]">
+                <select
+                  value={selectedFontSize}
+                  onChange={(e) => applyFontSize(e.target.value)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  className="appearance-none bg-transparent hover:bg-slate-200/60 dark:hover:bg-[#352b48] text-slate-800 dark:text-[#e8dff1] text-xs font-bold pl-2.5 pr-6 py-1 rounded-lg outline-none cursor-pointer transition-colors w-[52px] text-center"
+                  title="Cỡ chữ (Font size)"
                 >
-                  <span className="text-xs font-bold underline decoration-2" style={{ textDecorationColor: activeTextColor }}>A</span>
-                  <span className="text-[10px] text-slate-400 dark:text-[#ad8888] font-bold">-</span>
-                </button>
-
-                {showColorPicker && (
-                  <div className="absolute top-9 left-0 z-50 p-2 rounded-xl bg-white dark:bg-[#1e1a26] border border-slate-200 dark:border-[#373340] shadow-2xl flex items-center gap-1.5">
-                    {['#ff5167', '#0284c7', '#a855f7', '#10b981', '#f59e0b', '#0f172a', '#ffffff'].map((color) => (
-                      <button
-                        key={color}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => handleColorApply(color)}
-                        className="w-5 h-5 rounded-full border border-slate-300 dark:border-white/20 hover:scale-110 transition-transform shadow-sm"
-                        style={{ backgroundColor: color }}
-                        title={`Màu ${color}`}
-                        type="button"
-                      />
-                    ))}
-                  </div>
-                )}
+                  {[9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 48, 60, 72].map((sz) => (
+                    <option
+                      key={sz}
+                      value={sz}
+                      className="bg-white dark:bg-[#1e1a26] text-slate-800 dark:text-[#e8dff1] py-1 text-center font-medium"
+                    >
+                      {sz}
+                    </option>
+                  ))}
+                </select>
+                <span className="material-symbols-outlined text-[14px] text-slate-400 dark:text-[#ad8888] absolute right-1 pointer-events-none">
+                  arrow_drop_down
+                </span>
               </div>
-
-              {/* Pen / Highlighter Button (Cyan) */}
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleHighlightToggle}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isHighlightActive ? 'bg-sky-100 dark:bg-[#4cd7f6]/25 text-sky-600 dark:text-[#4cd7f6] border border-sky-300 dark:border-[#4cd7f6]/40 shadow-sm' : 'text-sky-600 dark:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Đánh dấu Highlight văn bản"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[16px]">edit</span>
-              </button>
             </div>
 
             {/* GROUP 3: Alignment, Lists, Quote & Code */}
@@ -1865,12 +1926,14 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
               <div className="mb-4">
                 {coverImage ? (
                   <div className="relative group rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/40 bg-slate-100 dark:bg-[#151025] shadow-xl">
-                    <img
+                    <OptimizedImage
                       src={coverImage}
                       alt="Ảnh bìa bài viết"
+                      sizes="(max-width: 1200px) 100vw, 1200px"
+                      containerClassName="w-full max-h-[380px]"
                       className="w-full max-h-[380px] object-cover rounded-2xl transition-transform duration-700 ease-out group-hover:scale-[1.01]"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none z-10" />
 
                     <div className="absolute top-3 right-3 flex items-center gap-2">
                       <button
@@ -2206,10 +2269,12 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                         </div>
 
                         <div className="relative overflow-hidden rounded-xl bg-slate-100 dark:bg-[#100c18]">
-                          <img
-                            alt={block.caption || 'Ảnh minh họa WebP'}
-                            className="w-full max-h-[420px] object-cover rounded-xl shadow-md transition-transform duration-500 hover:scale-[1.01]"
+                          <OptimizedImage
                             src={block.url}
+                            alt={block.caption || 'Ảnh minh họa WebP'}
+                            sizes="(max-width: 768px) 100vw, 1000px"
+                            containerClassName="w-full max-h-[420px]"
+                            className="w-full max-h-[420px] object-cover rounded-xl shadow-md transition-transform duration-500 hover:scale-[1.01]"
                           />
                         </div>
 
@@ -2395,12 +2460,14 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
             {coverImage ? (
               <div className="relative group rounded-xl overflow-hidden bg-slate-100 dark:bg-[#100c18] shadow-md border border-slate-200 dark:border-[#2c2835]">
-                <img
-                  alt="Ảnh bìa bài viết"
-                  className="w-full h-40 object-cover group-hover:scale-105 transition-transform duration-500"
+                <OptimizedImage
                   src={coverImage}
+                  alt="Ảnh bìa bài viết"
+                  sizes="400px"
+                  containerClassName="w-full h-40"
+                  className="w-full h-40 object-cover group-hover:scale-105 transition-transform duration-500"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 dark:from-[#100c18] via-transparent to-transparent opacity-80"></div>
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 dark:from-[#100c18] via-transparent to-transparent opacity-80 pointer-events-none z-10"></div>
                 <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between">
                   <span className="font-mono text-[10px] text-sky-300 dark:text-[#4cd7f6] bg-black/60 dark:bg-[#100c18]/80 backdrop-blur-md px-2 py-0.5 rounded">
                     WebP Format

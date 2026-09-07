@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { projectsData, filterCategories, processSteps } from './data/projectsData';
-import { optimizeImageUrl } from './utils/mediaOptimizer';
+import OptimizedImage from './components/common/OptimizedImage';
 
 export default function ProjectsPage() {
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -205,12 +205,12 @@ export default function ProjectsPage() {
               {/* Media Preview */}
               <div className="lg:col-span-7 group">
                 <div className="relative rounded-2xl overflow-hidden border border-purple-900/40 bg-[#151025] shadow-2xl">
-                  <img 
-                    src={optimizeImageUrl(flagshipProject.image, { width: 1000, quality: 80 })} 
+                  <OptimizedImage 
+                    src={flagshipProject.image} 
                     alt={flagshipProject.title} 
-                    loading="eager"
-                    fetchPriority="high"
-                    decoding="async"
+                    priority={true}
+                    sizes="(max-width: 1024px) 100vw, 800px"
+                    containerClassName="w-full h-80 sm:h-96"
                     className="w-full h-80 sm:h-96 object-cover object-center group-hover:scale-105 transition-transform duration-700 ease-out" 
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#0c0915] via-transparent to-transparent opacity-80" />
@@ -353,11 +353,11 @@ export default function ProjectsPage() {
               >
                 {/* Image Cover */}
                 <div className="relative h-48 overflow-hidden bg-slate-900">
-                  <img 
-                    src={optimizeImageUrl(project.image, { width: 600, quality: 75 })} 
+                  <OptimizedImage 
+                    src={project.image} 
                     alt={project.title} 
-                    loading="lazy"
-                    decoding="async"
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                    containerClassName="w-full h-full"
                     className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500" 
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#141024] via-transparent to-transparent opacity-80" />
@@ -582,11 +582,11 @@ export default function ProjectsPage() {
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-6 text-sm leading-relaxed">
               <div className="rounded-xl overflow-hidden h-64 w-full bg-slate-900 border border-white/5">
-                <img 
-                  src={optimizeImageUrl(selectedModalProject.image, { width: 800, quality: 80 })} 
+                <OptimizedImage 
+                  src={selectedModalProject.image} 
                   alt={selectedModalProject.title} 
-                  loading="lazy"
-                  decoding="async"
+                  sizes="800px"
+                  containerClassName="w-full h-full"
                   className="w-full h-full object-cover object-center" 
                 />
               </div>

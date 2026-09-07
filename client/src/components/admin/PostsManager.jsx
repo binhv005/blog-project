@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useBlog } from '../../context/BlogContext';
 import { useToast } from '../../context/ToastContext';
 import { optimizeImageUrl } from '../../utils/mediaOptimizer';
+import OptimizedImage from '../common/OptimizedImage';
 import ConfirmModal from '../ConfirmModal';
 
 export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) {
@@ -158,11 +159,13 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
                 {/* Left: Thumbnail & Info */}
                 <div className="flex items-start sm:items-center gap-3 sm:gap-4 min-w-0 flex-1 w-full">
                   <div className="w-16 h-16 sm:w-20 sm:h-14 rounded-xl overflow-hidden bg-slate-100 dark:bg-[#2c2835] flex-shrink-0 border border-slate-200 dark:border-[#373340]/40 mt-0.5 sm:mt-0 shadow-sm">
-                    <img
-                      src={optimizeImageUrl(post.coverImage || 'https://images.unsplash.com/photo-1518770660439-4636190af475', { width: 160, quality: 75 })}
+                    <OptimizedImage
+                      src={post.coverImage}
                       alt={post.title}
-                      loading="lazy"
-                      decoding="async"
+                      width={80}
+                      height={56}
+                      sizes="(max-width: 640px) 64px, 80px"
+                      containerClassName="w-full h-full"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                   </div>

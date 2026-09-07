@@ -1,6 +1,7 @@
 import React from 'react';
 import { useBlog } from '../context/BlogContext';
 import { optimizeImageUrl, formatVideoEmbedUrl } from '../utils/mediaOptimizer';
+import OptimizedImage from './common/OptimizedImage';
 
 function formatRichText(raw) {
   if (!raw) return '';
@@ -77,14 +78,13 @@ export default function ArticleBody() {
             }
 
             if (block.type === 'image' && block.url) {
-              const optimizedUrl = optimizeImageUrl(block.url, { width: 1000, quality: 80 });
               return (
                 <figure key={block.id || idx} className="my-8 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl">
-                  <img
-                    src={optimizedUrl}
+                  <OptimizedImage
+                    src={block.url}
                     alt={block.caption || 'Hình minh họa WebP'}
-                    loading="lazy"
-                    decoding="async"
+                    sizes="(max-width: 768px) 100vw, 1000px"
+                    containerClassName="w-full max-h-[480px]"
                     className="w-full max-h-[480px] object-cover"
                   />
                   {block.caption && (
