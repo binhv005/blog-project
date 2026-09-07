@@ -8,7 +8,6 @@
     "start": "node server/server.js",
     "server": "node server/server.js",
     "dev:all": "concurrently \"npm run server\" \"npm run dev\"",
-    "prebuild": "npm install",
     "build": "vite build",
     "preview": "vite preview"
   },
