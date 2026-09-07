@@ -19,6 +19,7 @@ node_modules/
 # Nếu có các file env khác
 *.env
 *.env.*
+!.env.example
 
 # ==========================================
 # Logs
