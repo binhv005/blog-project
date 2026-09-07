@@ -2,10 +2,12 @@ import mongoose from 'mongoose';
 import dns from 'dns';
 
 // Fix for Windows DNS SRV query ECONNREFUSED on MongoDB Atlas
-try {
-  dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
-} catch (e) {
-  console.warn('[DNS] Không thể gán custom DNS servers:', e.message);
+if (process.platform === 'win32') {
+  try {
+    dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+  } catch (e) {
+    console.warn('[DNS] Không thể gán custom DNS servers:', e.message);
+  }
 }
 
 export const connectDB = async () => {
