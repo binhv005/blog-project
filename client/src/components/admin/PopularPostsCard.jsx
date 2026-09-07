@@ -1,5 +1,6 @@
 import React from 'react';
 import { useBlog } from '../../context/BlogContext';
+import { optimizeImageUrl } from '../../utils/mediaOptimizer';
 
 export default function PopularPostsCard({ onOpenAllPosts }) {
   const { popularPosts, selectPost } = useBlog();
@@ -35,7 +36,9 @@ export default function PopularPostsCard({ onOpenAllPosts }) {
               <img 
                 alt={post.title} 
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
-                src={post.coverImage || 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=400&q=80'} 
+                src={optimizeImageUrl(post.coverImage || 'https://images.unsplash.com/photo-1518770660439-4636190af475', { width: 140, quality: 75 })}
+                loading="lazy"
+                decoding="async" 
               />
             </div>
 

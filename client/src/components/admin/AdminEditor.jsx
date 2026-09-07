@@ -1,31 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useBlog } from '../../context/BlogContext';
 import { useToast } from '../../context/ToastContext';
-
-// Helper to format YouTube and Vimeo URLs into proper embed iframe URLs
-function formatVideoEmbedUrl(url) {
-  if (!url) return '';
-  let cleanUrl = String(url).trim();
-
-  const iframeMatch = cleanUrl.match(/src=["']([^"']+)["']/i);
-  if (iframeMatch) {
-    cleanUrl = iframeMatch[1];
-  }
-
-  const ytMatch = cleanUrl.match(
-    /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/i
-  );
-  if (ytMatch && ytMatch[1]) {
-    return `https://www.youtube.com/embed/${ytMatch[1]}`;
-  }
-
-  const vimeoMatch = cleanUrl.match(/(?:vimeo\.com\/(?:video\/|channels\/[\w-]+\/|groups\/[^\/]*\/videos\/|album\/\d+\/video\/|))(\d+)/i);
-  if (vimeoMatch && vimeoMatch[1]) {
-    return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
-  }
-
-  return cleanUrl;
-}
+import { compressImageFile, optimizeImageUrl, formatVideoEmbedUrl } from '../../utils/mediaOptimizer';
 
 // Helper to convert legacy Markdown to HTML for initial block load
 function mdToHtml(str) {
@@ -1238,11 +1214,15 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     const fileName = file.name;
 
     try {
-      // Convert to Base64 to ensure persistent, crash-free preview and storage
-      const base64Data = await readFileAsBase64(file);
+      // 1. Client-side canvas compression to WebP to reduce file size by 80-90% & accelerate uploads
+      const { base64: base64Data, blob: compressedBlob } = await compressImageFile(file, {
+        maxWidth: 1600,
+        maxHeight: 1600,
+        quality: 0.85
+      });
       let uploadedUrl = base64Data;
 
-      // 1. Attempt upload to backend API (handles Cloudinary on server)
+      // 2. Attempt upload to backend API (handles Cloudinary on server)
       let uploadSuccess = false;
       try {
         const apiRes = await fetch('/api/upload', {
@@ -1265,7 +1245,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         // Backend API offline or error, try direct Cloudinary upload below
       }
 
-      // 2. Direct Cloudinary upload fallback if server API was not reached
+      // 3. Direct Cloudinary upload fallback if server API was not reached
       if (!uploadSuccess) {
         const cloudName = 'dq0w6ycvk';
         const uploadPreset = 'dudi_blog_preset';
@@ -1273,7 +1253,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         if (cloudName && uploadPreset && uploadPreset !== 'YOUR_UPLOAD_PRESET') {
           try {
             const formData = new FormData();
-            formData.append('file', file);
+            formData.append('file', compressedBlob || file);
             formData.append('upload_preset', uploadPreset);
             formData.append('folder', isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks');
 
@@ -1300,7 +1280,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         insertImageAtCursor(uploadedUrl, fileName);
       }
     } catch (err) {
-      console.warn('Lỗi đọc/upload ảnh:', err);
+      console.warn('Lỗi nén/upload ảnh:', err);
     } finally {
       e.target.value = '';
     }

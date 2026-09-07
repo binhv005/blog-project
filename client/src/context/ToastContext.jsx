@@ -78,7 +78,7 @@ export function ToastProvider({ children }) {
           return (
             <div
               key={t.id}
-              className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl bg-[#1c152c]/95 border ${style.borderColor} shadow-[0_15px_40px_rgba(0,0,0,0.6)] backdrop-blur-xl text-white transform transition-all duration-300 animate-in slide-in-from-top-4 fade-in relative overflow-hidden`}
+              className={`pointer-events-auto flex items-center gap-3.5 p-3.5 sm:p-4 rounded-2xl bg-[#1c152c]/95 border ${style.borderColor} shadow-[0_15px_40px_rgba(0,0,0,0.6)] backdrop-blur-xl text-white transform transition-all duration-300 animate-in slide-in-from-top-4 fade-in relative overflow-hidden`}
             >
               {/* Left Type Icon */}
               <div className={`p-2 rounded-xl ${style.bgGlow} flex-shrink-0 flex items-center justify-center`}>
@@ -88,7 +88,7 @@ export function ToastProvider({ children }) {
               </div>
 
               {/* Message Content */}
-              <div className="flex-1 min-w-0 pt-0.5">
+              <div className="flex-1 min-w-0 flex items-center">
                 <p className="text-xs sm:text-sm font-medium text-slate-100 leading-snug break-words">
                   {t.message}
                 </p>
@@ -98,7 +98,7 @@ export function ToastProvider({ children }) {
               <button
                 type="button"
                 onClick={() => removeToast(t.id)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0 -mr-1 -mt-1"
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0 flex items-center justify-center"
                 title="Đóng thông báo"
               >
                 <span className="material-symbols-outlined text-[16px]">close</span>

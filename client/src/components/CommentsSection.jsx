@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { optimizeImageUrl } from '../utils/mediaOptimizer';
 
 const initialComments = [
   {
@@ -134,7 +135,9 @@ export default function CommentsSection() {
                 <img 
                   alt={comment.author} 
                   className="w-9 h-9 rounded-full object-cover ring-1 ring-white/20" 
-                  src={comment.avatar} 
+                  src={optimizeImageUrl(comment.avatar, { width: 80, quality: 75 })}
+                  loading="lazy"
+                  decoding="async" 
                 />
                 <div>
                   <h4 className="text-sm font-bold text-white flex items-center gap-2">
@@ -174,7 +177,9 @@ export default function CommentsSection() {
                 <img 
                   alt={reply.author} 
                   className="w-8 h-8 rounded-full object-cover ring-1 ring-rose-500/50 flex-shrink-0" 
-                  src={reply.avatar} 
+                  src={optimizeImageUrl(reply.avatar, { width: 80, quality: 75 })}
+                  loading="lazy"
+                  decoding="async" 
                 />
                 <div>
                   <div className="flex items-center gap-2 mb-1">

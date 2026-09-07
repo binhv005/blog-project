@@ -44,33 +44,33 @@ export default function ConfirmModal({
         />
 
         {/* Modal Header */}
-        <div className="flex items-start gap-4 mb-4">
+        <div className="flex flex-col items-center text-center gap-3 mb-4">
           <div
-            className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+            className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${
               isDanger
-                ? 'bg-red-500/15 text-red-400 border border-red-500/30'
+                ? 'bg-red-500/15 text-red-400 border border-red-500/30 shadow-lg shadow-red-500/10'
                 : isWarning
-                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                : 'bg-[#4cd7f6]/15 text-[#4cd7f6] border border-[#4cd7f6]/30'
+                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-lg shadow-amber-500/10'
+                : 'bg-[#4cd7f6]/15 text-[#4cd7f6] border border-[#4cd7f6]/30 shadow-lg shadow-sky-500/10'
             }`}
           >
-            <span className="material-symbols-outlined text-[24px]">
+            <span className="material-symbols-outlined text-[28px]">
               {isDanger ? 'delete_forever' : isWarning ? 'warning' : 'help'}
             </span>
           </div>
 
-          <div className="flex-1 min-w-0">
-            <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
+          <div className="w-full">
+            <h3 className="text-base sm:text-lg font-bold text-white tracking-tight text-center">
               {title}
             </h3>
-            <p className="text-xs sm:text-sm text-on-surface-variant/90 mt-1 leading-relaxed">
+            <p className="text-xs sm:text-sm text-on-surface-variant/90 mt-1.5 leading-relaxed text-center">
               {message}
             </p>
           </div>
         </div>
 
         {/* Modal Actions */}
-        <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-[#2c2835]/60">
+        <div className="flex items-center justify-center gap-3 mt-6 pt-4 border-t border-[#2c2835]/60">
           <button
             type="button"
             onClick={onCancel}

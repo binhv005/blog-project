@@ -1,29 +1,6 @@
 import React from 'react';
 import { useBlog } from '../context/BlogContext';
-
-function formatVideoEmbedUrl(url) {
-  if (!url) return '';
-  let cleanUrl = String(url).trim();
-
-  const iframeMatch = cleanUrl.match(/src=["']([^"']+)["']/i);
-  if (iframeMatch) {
-    cleanUrl = iframeMatch[1];
-  }
-
-  const ytMatch = cleanUrl.match(
-    /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/i
-  );
-  if (ytMatch && ytMatch[1]) {
-    return `https://www.youtube.com/embed/${ytMatch[1]}`;
-  }
-
-  const vimeoMatch = cleanUrl.match(/(?:vimeo\.com\/(?:video\/|channels\/[\w-]+\/|groups\/[^\/]*\/videos\/|album\/\d+\/video\/|))(\d+)/i);
-  if (vimeoMatch && vimeoMatch[1]) {
-    return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
-  }
-
-  return cleanUrl;
-}
+import { optimizeImageUrl, formatVideoEmbedUrl } from '../utils/mediaOptimizer';
 
 function formatRichText(raw) {
   if (!raw) return '';
@@ -41,8 +18,9 @@ function formatRichText(raw) {
     // Embedded images: ![caption](url)
     .replace(/!\[(.*?)\]\((.*?)\)/g, (_, caption, url) => {
       const cleanCaption = caption ? caption.trim() : '';
+      const optimizedUrl = optimizeImageUrl(url, { width: 1000, quality: 80 });
       return `<figure class="my-6 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl">
-        <img src="${url}" alt="${cleanCaption || 'Hình ảnh bài viết WebP'}" class="w-full max-h-[480px] object-cover rounded-t-2xl transition-transform duration-500 hover:scale-[1.01]" />
+        <img src="${optimizedUrl}" alt="${cleanCaption || 'Hình ảnh bài viết WebP'}" loading="lazy" decoding="async" class="w-full max-h-[480px] object-cover rounded-t-2xl transition-transform duration-500 hover:scale-[1.01]" />
         ${cleanCaption ? `<figcaption class="text-xs text-slate-600 dark:text-slate-400 italic text-center py-2.5 px-4 bg-slate-50 dark:bg-[#100c18] border-t border-slate-200 dark:border-white/5">${cleanCaption}</figcaption>` : ''}
       </figure>`;
     })
@@ -99,11 +77,14 @@ export default function ArticleBody() {
             }
 
             if (block.type === 'image' && block.url) {
+              const optimizedUrl = optimizeImageUrl(block.url, { width: 1000, quality: 80 });
               return (
                 <figure key={block.id || idx} className="my-8 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl">
                   <img
-                    src={block.url}
+                    src={optimizedUrl}
                     alt={block.caption || 'Hình minh họa WebP'}
+                    loading="lazy"
+                    decoding="async"
                     className="w-full max-h-[480px] object-cover"
                   />
                   {block.caption && (
@@ -182,10 +163,11 @@ export default function ArticleBody() {
               const embedUrl = formatVideoEmbedUrl(block.url);
               return (
                 <figure key={block.id || idx} className="my-8 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl">
-                  <div className="relative aspect-video w-full">
+                  <div className="relative aspect-video w-full bg-black">
                     <iframe
                       src={embedUrl}
                       title={block.caption || 'Video'}
+                      loading="lazy"
                       className="w-full h-full border-0"
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                       allowFullScreen

@@ -1,10 +1,13 @@
 import React from 'react';
 import { useBlog } from '../context/BlogContext';
+import { optimizeImageUrl } from '../utils/mediaOptimizer';
 
 export default function ArticleHeader() {
   const { activePost } = useBlog();
 
   if (!activePost) return null;
+
+  const optimizedCover = optimizeImageUrl(activePost.coverImage, { width: 1200, quality: 85 });
 
   return (
     <div className="mb-6">
@@ -14,7 +17,10 @@ export default function ArticleHeader() {
           <img
             alt={activePost.title}
             className="w-full max-h-[480px] object-cover object-center transform transition-transform duration-700 ease-out group-hover:scale-[1.01]"
-            src={activePost.coverImage}
+            src={optimizedCover}
+            loading="eager"
+            fetchPriority="high"
+            decoding="async"
           />
           <div className="absolute inset-0 ring-1 ring-inset ring-black/5 dark:ring-white/10 rounded-2xl pointer-events-none" />
         </div>
