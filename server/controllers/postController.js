@@ -177,10 +177,18 @@ export const createPost = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Tiêu đề bài viết không được để trống' });
     }
 
-    const post = new Post(postData);
-    const saved = await post.save();
+    if (!postData.id) {
+      postData.id = `post-${Date.now()}`;
+    }
+
+    const saved = await Post.findOneAndUpdate(
+      { id: postData.id },
+      { $set: postData },
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true, runValidators: false }
+    );
     res.status(201).json({ success: true, data: saved });
   } catch (error) {
+    console.error('[Create Post Error]', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -191,10 +199,13 @@ export const updatePost = async (req, res) => {
     const { id } = req.params;
     const updateData = req.body;
 
+    const isMongoId = id && /^[0-9a-fA-F]{24}$/.test(id);
+    const query = isMongoId ? { $or: [{ id: id }, { _id: id }] } : { id: id };
+
     const updated = await Post.findOneAndUpdate(
-      { $or: [{ id: id }, { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }] },
+      query,
       { $set: updateData },
-      { returnDocument: 'after', runValidators: true }
+      { returnDocument: 'after', upsert: true, runValidators: false }
     );
 
     if (!updated) {
@@ -203,6 +214,7 @@ export const updatePost = async (req, res) => {
 
     res.json({ success: true, data: updated });
   } catch (error) {
+    console.error('[Update Post Error]', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

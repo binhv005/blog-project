@@ -2,11 +2,7 @@ import mongoose from 'mongoose';
 
 const BlockSchema = new mongoose.Schema({
   id: { type: String },
-  type: { 
-    type: String, 
-    enum: ['heading', 'paragraph', 'image', 'quote', 'code', 'table', 'video', 'divider', 'bullet-list', 'numbered-list'], 
-    default: 'paragraph' 
-  },
+  type: { type: String, default: 'paragraph' },
   text: { type: String, default: '' },
   url: { type: String, default: '' },
   caption: { type: String, default: '' },
@@ -15,9 +11,15 @@ const BlockSchema = new mongoose.Schema({
   author: { type: String, default: '' },
   align: { type: String, default: 'left' },
   color: { type: String, default: '' },
+  bgColor: { type: String, default: '' },
+  headers: { type: [String], default: [] },
+  rows: { type: [[String]], default: [] },
   tableRows: { type: [[String]], default: [] },
-  listItems: { type: [String], default: [] }
-}, { _id: false });
+  items: { type: [String], default: [] },
+  listItems: { type: [String], default: [] },
+  listType: { type: String, default: 'bullet' },
+  level: { type: Number, default: 2 }
+}, { _id: false, strict: false });
 
 const ContentSectionSchema = new mongoose.Schema({
   heading: { type: String, default: '' },

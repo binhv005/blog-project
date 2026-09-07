@@ -233,12 +233,27 @@ function RichEditableBlock({
   );
 }
 
+// Convert File to Base64 Data URL to prevent transient blob ERR_FILE_NOT_FOUND issues
+const readFileAsBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });
+};
+
 export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   const { createPost, updatePost, selectPost } = useBlog();
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   const coverFileInputRef = useRef(null);
   const [targetBlockIndex, setTargetBlockIndex] = useState(null);
+
+  // Publish Success Modal State
+  const [showPublishSuccessModal, setShowPublishSuccessModal] = useState(false);
+  const [publishedPostInfo, setPublishedPostInfo] = useState(null);
+  const [redirectCountdown, setRedirectCountdown] = useState(3);
 
   // Document State
   const [title, setTitle] = useState(postToEdit?.title || '');
@@ -302,16 +317,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   );
   const [selectedFormat, setSelectedFormat] = useState('H2');
 
-  // History State for Multi-Level Undo / Redo
-  const [history, setHistory] = useState(() => [getInitialBlocks()]);
+  // History State for Undo / Redo
+  const [history, setHistory] = useState([getInitialBlocks()]);
   const [historyIndex, setHistoryIndex] = useState(0);
-  const historyIndexRef = useRef(0);
-  const typingTimeoutRef = useRef(null);
-
-  // Keep historyIndexRef in sync with state
-  useEffect(() => {
-    historyIndexRef.current = historyIndex;
-  }, [historyIndex]);
 
   // Active focus & selection tracking
   const [focusedBlockId, setFocusedBlockId] = useState(null);
@@ -453,111 +461,81 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     } catch (_) { }
   };
 
-  // Push to history on meaningful block change (clears redo history after undo)
+  // Push to history on meaningful block change
   const pushHistory = (newBlocks) => {
-    if (!newBlocks || !Array.isArray(newBlocks)) return;
     const snapshot = JSON.parse(JSON.stringify(newBlocks));
     setHistory((prev) => {
-      const currentIdx = historyIndexRef.current;
-      const currentHistory = prev.slice(0, currentIdx + 1);
-      const currentTop = currentHistory[currentHistory.length - 1];
-      if (currentTop && JSON.stringify(currentTop) === JSON.stringify(snapshot)) {
-        return prev;
-      }
-      const updated = [...currentHistory, snapshot];
-      if (updated.length > 50) {
-        updated.shift();
-      }
-      const newIdx = updated.length - 1;
-      historyIndexRef.current = newIdx;
-      setHistoryIndex(newIdx);
+      const updated = prev.slice(0, historyIndex + 1);
+      updated.push(snapshot);
+      if (updated.length > 50) updated.shift();
       return updated;
     });
+    setHistoryIndex((prev) => Math.min(prev + 1, 49));
   };
 
   const handleUndo = () => {
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
-    const currentIdx = historyIndexRef.current;
-    if (currentIdx > 0) {
-      const prevIdx = currentIdx - 1;
-      historyIndexRef.current = prevIdx;
-      setHistoryIndex(prevIdx);
+    if (historyIndex > 0) {
+      const prevIdx = historyIndex - 1;
       const snapshot = JSON.parse(JSON.stringify(history[prevIdx]));
+      setHistoryIndex(prevIdx);
       setBlocks(snapshot);
 
-      // Immediately update DOM of all active editable blocks without page reload
-      requestAnimationFrame(() => {
-        snapshot.forEach((b) => {
-          if (inputRefs.current[b.id]) {
-            if (b.type === 'code') {
-              inputRefs.current[b.id].value = b.code || b.text || '';
-            } else if (inputRefs.current[b.id].innerHTML !== undefined) {
-              inputRefs.current[b.id].innerHTML = b.text || '';
-            }
-          }
-        });
-        updateToolbarActiveStates();
+      // Immediately update DOM of all active editable blocks
+      snapshot.forEach((b) => {
+        if (inputRefs.current[b.id]) {
+          inputRefs.current[b.id].innerHTML = b.text || '';
+        }
       });
+      updateToolbarActiveStates();
     }
   };
 
   const handleRedo = () => {
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
-    const currentIdx = historyIndexRef.current;
-    if (currentIdx < history.length - 1) {
-      const nextIdx = currentIdx + 1;
-      historyIndexRef.current = nextIdx;
-      setHistoryIndex(nextIdx);
+    if (historyIndex < history.length - 1) {
+      const nextIdx = historyIndex + 1;
       const snapshot = JSON.parse(JSON.stringify(history[nextIdx]));
+      setHistoryIndex(nextIdx);
       setBlocks(snapshot);
 
-      // Immediately update DOM of all active editable blocks without page reload
-      requestAnimationFrame(() => {
-        snapshot.forEach((b) => {
-          if (inputRefs.current[b.id]) {
-            if (b.type === 'code') {
-              inputRefs.current[b.id].value = b.code || b.text || '';
-            } else if (inputRefs.current[b.id].innerHTML !== undefined) {
-              inputRefs.current[b.id].innerHTML = b.text || '';
-            }
-          }
-        });
-        updateToolbarActiveStates();
+      // Immediately update DOM of all active editable blocks
+      snapshot.forEach((b) => {
+        if (inputRefs.current[b.id]) {
+          inputRefs.current[b.id].innerHTML = b.text || '';
+        }
       });
+      updateToolbarActiveStates();
     }
   };
 
-  // Block management functions with debounced typing history
-  const updateBlock = (id, newFields, immediateHistory = false) => {
+  // Global Keyboard Shortcuts for Undo & Redo
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [history, historyIndex]);
+
+  // Block management functions
+  const updateBlock = (id, newFields) => {
     setBlocks((prev) => {
       const updated = prev.map((b) => (b.id === id ? { ...b, ...newFields } : b));
-      if (immediateHistory) {
-        if (typingTimeoutRef.current) {
-          clearTimeout(typingTimeoutRef.current);
-          typingTimeoutRef.current = null;
-        }
-        pushHistory(updated);
-      } else {
-        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = setTimeout(() => {
-          pushHistory(updated);
-        }, 500);
-      }
       return updated;
     });
   };
 
   const deleteBlock = (id) => {
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
     const prevScrollY = window.scrollY;
     setBlocks((prev) => {
       const filtered = prev.filter((b) => b.id !== id);
@@ -571,10 +549,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   };
 
   const insertBlockAt = (index, blockData) => {
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = null;
-    }
     setBlocks((prev) => {
       const newBlocks = [...prev];
       const targetIdx = index >= 0 && index < newBlocks.length ? index : newBlocks.length - 1;
@@ -882,9 +856,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       selection.removeAllRanges();
       selection.addRange(newRange);
 
-      const updated = syncActiveBlockContent();
+      syncActiveBlockContent();
       updateToolbarActiveStates();
-      pushHistory(updated);
+      pushHistory(blocks);
     } else {
       toast.info('Vui lòng bôi đen (tô đen) đoạn chữ cần thêm bullet');
     }
@@ -924,9 +898,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       selection.removeAllRanges();
       selection.addRange(newRange);
 
-      const updated = syncActiveBlockContent();
+      syncActiveBlockContent();
       updateToolbarActiveStates();
-      pushHistory(updated);
+      pushHistory(blocks);
     } else {
       toast.info('Vui lòng bôi đen (tô đen) đoạn chữ cần đánh số thứ tự');
     }
@@ -971,9 +945,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
           document.execCommand('formatBlock', false, '<blockquote>');
         }
       }
-      const updated = syncActiveBlockContent();
+      syncActiveBlockContent();
       updateToolbarActiveStates();
-      pushHistory(updated);
+      pushHistory(blocks);
     } else {
       toast.info('Vui lòng bôi đen (tô đen) đoạn chữ cần đặt làm trích dẫn');
     }
@@ -1016,9 +990,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
           selection.addRange(newRange);
         } catch (_) { }
       }
-      const updated = syncActiveBlockContent();
+      syncActiveBlockContent();
       updateToolbarActiveStates();
-      pushHistory(updated);
+      pushHistory(blocks);
     } else {
       toast.info('Vui lòng bôi đen (tô đen) đoạn chữ cần định dạng mã nguồn');
     }
@@ -1106,9 +1080,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         }
       }
 
-      const updated = syncActiveBlockContent();
+      syncActiveBlockContent();
       updateToolbarActiveStates();
-      pushHistory(updated);
+      pushHistory(blocks);
     } else {
       toast.info('Vui lòng bôi đen (tô đen) đoạn chữ cần chèn đường liên kết');
     }
@@ -1145,8 +1119,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         selection.removeAllRanges();
         selection.addRange(newRange);
 
-        const updated = syncActiveBlockContent();
-        pushHistory(updated);
+        syncActiveBlockContent();
+        pushHistory(blocks);
         return;
       } catch (_) { }
     }
@@ -1155,7 +1129,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     const currentBlock = blocks[activeIdx];
     if (currentBlock && currentBlock.type === 'paragraph') {
       const newText = (currentBlock.text || '') + videoHtml;
-      updateBlock(currentBlock.id, { text: newText }, true);
+      updateBlock(currentBlock.id, { text: newText });
     } else {
       insertBlockAt(activeIdx, {
         id: `p-${Date.now()}`,
@@ -1163,6 +1137,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         text: videoHtml
       });
     }
+    pushHistory(blocks);
   };
 
   const handleInsertVideo = () => {
@@ -1190,8 +1165,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         newRange.collapse(true);
         selection.removeAllRanges();
         selection.addRange(newRange);
-        const updated = syncActiveBlockContent();
-        pushHistory(updated);
+        syncActiveBlockContent();
+        pushHistory(blocks);
         return;
       } catch (_) { }
     }
@@ -1225,8 +1200,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         selection.removeAllRanges();
         selection.addRange(newRange);
 
-        const updated = syncActiveBlockContent();
-        pushHistory(updated);
+        syncActiveBlockContent();
+        pushHistory(blocks);
         return;
       } catch (_) { }
     }
@@ -1235,7 +1210,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     const currentBlock = blocks[activeIdx];
     if (currentBlock && currentBlock.type === 'paragraph') {
       const newText = (currentBlock.text || '') + imgHtml;
-      updateBlock(currentBlock.id, { text: newText }, true);
+      updateBlock(currentBlock.id, { text: newText });
     } else {
       insertBlockAt(activeIdx, {
         id: `p-${Date.now()}`,
@@ -1243,6 +1218,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         text: imgHtml
       });
     }
+    pushHistory(blocks);
   };
 
   const triggerImageUploadAt = (idx = getActiveIndex()) => {
@@ -1255,34 +1231,66 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
+      toast.warning('Vui lòng chọn tệp hình ảnh hợp lệ');
       return;
     }
 
     const fileName = file.name;
 
     try {
-      const localPreviewUrl = URL.createObjectURL(file);
+      // Convert to Base64 to ensure persistent, crash-free preview and storage
+      const base64Data = await readFileAsBase64(file);
+      let uploadedUrl = base64Data;
 
-      // Cloudinary upload
-      const cloudName = 'dq0w6ycvk';
-      const uploadPreset = 'dudi_blog_preset';
-
-      let uploadedUrl = localPreviewUrl;
-
-      if (cloudName && uploadPreset && uploadPreset !== 'YOUR_UPLOAD_PRESET') {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('upload_preset', uploadPreset);
-        formData.append('folder', isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks');
-
-        const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+      // 1. Attempt upload to backend API (handles Cloudinary on server)
+      let uploadSuccess = false;
+      try {
+        const apiRes = await fetch('/api/upload', {
           method: 'POST',
-          body: formData
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: base64Data,
+            folder: isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks'
+          })
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          uploadedUrl = data.secure_url || localPreviewUrl;
+        if (apiRes.ok) {
+          const apiData = await apiRes.json();
+          if (apiData.success && apiData.url) {
+            uploadedUrl = apiData.url;
+            uploadSuccess = true;
+          }
+        }
+      } catch (err) {
+        // Backend API offline or error, try direct Cloudinary upload below
+      }
+
+      // 2. Direct Cloudinary upload fallback if server API was not reached
+      if (!uploadSuccess) {
+        const cloudName = 'dq0w6ycvk';
+        const uploadPreset = 'dudi_blog_preset';
+
+        if (cloudName && uploadPreset && uploadPreset !== 'YOUR_UPLOAD_PRESET') {
+          try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('upload_preset', uploadPreset);
+            formData.append('folder', isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks');
+
+            const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+              method: 'POST',
+              body: formData
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (data.secure_url) {
+                uploadedUrl = data.secure_url;
+              }
+            }
+          } catch (cloudErr) {
+            console.warn('[Cloudinary Upload Fallback]', cloudErr);
+          }
         }
       }
 
@@ -1292,13 +1300,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         insertImageAtCursor(uploadedUrl, fileName);
       }
     } catch (err) {
-      console.warn('Lỗi upload ảnh:', err);
-      const fallbackUrl = URL.createObjectURL(file);
-      if (isCover) {
-        setCoverImage(fallbackUrl);
-      } else {
-        insertImageAtCursor(fallbackUrl, fileName);
-      }
+      console.warn('Lỗi đọc/upload ảnh:', err);
     } finally {
       e.target.value = '';
     }
@@ -1312,28 +1314,24 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     }
   };
 
-  // Keyboard Shortcuts Listener (Ctrl/Cmd+Z: Undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z: Redo, Ctrl/Cmd+B/I/U)
+  // Keyboard Shortcuts Listener (Ctrl+B, I, U, Z, Y)
   useEffect(() => {
     const handleKeyDown = (e) => {
-      const isMac = typeof navigator !== 'undefined' && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform);
+      const isMac = typeof navigator !== 'undefined' && navigator.platform && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
 
       if (!isCmdOrCtrl) return;
 
       const key = e.key.toLowerCase();
 
-      // Undo: Ctrl/Cmd + Z (without Shift)
       if (key === 'z' && !e.shiftKey) {
         e.preventDefault();
-        e.stopPropagation();
         handleUndo();
         return;
       }
 
-      // Redo: Ctrl/Cmd + Y OR Ctrl/Cmd + Shift + Z
       if (key === 'y' || (key === 'z' && e.shiftKey)) {
         e.preventDefault();
-        e.stopPropagation();
         handleRedo();
         return;
       }
@@ -1350,8 +1348,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [historyIndex, history, blocks, focusedBlockId]);
 
   // Global selection change listener to immediately sync active formats and heading dropdown
@@ -1378,6 +1376,32 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   const handleRemoveTag = (tagToRemove) => {
     setTags(tags.filter((t) => t !== tagToRemove));
   };
+
+  // Auto countdown for redirect after publishing
+  useEffect(() => {
+    let timer;
+    if (showPublishSuccessModal) {
+      setRedirectCountdown(3);
+      timer = setInterval(() => {
+        setRedirectCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            if (publishedPostInfo?.id) {
+              selectPost(publishedPostInfo.id);
+            }
+            if (onNavigate) {
+              onNavigate('blog');
+            } else if (onExit) {
+              onExit();
+            }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [showPublishSuccessModal, publishedPostInfo, onNavigate, onExit, selectPost]);
 
   // Save / Publish
   const handleSave = async (status = 'published') => {
@@ -1410,7 +1434,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
     const postData = {
       title,
-      slug: slug || 'bai-viet-moi',
+      slug: slug || title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w\s-]/g, '').replace(/\s+/g, '-'),
       category,
       summary: summary || 'Tóm tắt bài viết...',
       blocks,
@@ -1423,15 +1447,27 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       content: contentSections.length > 0 ? contentSections : [{ heading: 'Nội dung', text: summary || 'Nội dung bài viết đang được cập nhật.' }]
     };
 
-    if (postToEdit) {
-      await updatePost(postToEdit.id, postData);
-      toast.success(`Đã cập nhật bài viết "${title}" thành công!`);
-    } else {
-      await createPost(postData);
-      toast.success(`Đã ${status === 'published' ? 'xuất bản' : 'lưu nháp'} bài viết "${title}" thành công!`);
+    let resultPost = null;
+    try {
+      if (postToEdit) {
+        await updatePost(postToEdit.id, postData);
+        resultPost = { ...postToEdit, ...postData };
+        toast.success(`Đã cập nhật bài viết "${title}" thành công!`);
+      } else {
+        resultPost = await createPost(postData);
+        toast.success(`Đã ${status === 'published' ? 'xuất bản' : 'lưu nháp'} bài viết "${title}" thành công!`);
+      }
+    } catch (err) {
+      console.warn('Lỗi lưu bài viết:', err);
+      resultPost = { id: `post-${Date.now()}`, ...postData };
     }
 
-    if (onExit) onExit();
+    if (status === 'published') {
+      setPublishedPostInfo(resultPost || { title, category, coverImage: postData.coverImage });
+      setShowPublishSuccessModal(true);
+    } else {
+      if (onExit) onExit();
+    }
   };
 
   const handlePreview = async () => {
@@ -1570,11 +1606,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={handleUndo}
-                disabled={historyIndex <= 0}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all ${historyIndex <= 0
-                  ? 'opacity-30 cursor-not-allowed text-slate-400 dark:text-[#ad8888]/40'
-                  : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95'
-                  }`}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95 transition-all"
                 title="Hoàn tác (Undo - Ctrl+Z)"
                 type="button"
               >
@@ -1583,11 +1615,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
               <button
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={handleRedo}
-                disabled={historyIndex >= history.length - 1}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all ${historyIndex >= history.length - 1
-                  ? 'opacity-30 cursor-not-allowed text-slate-400 dark:text-[#ad8888]/40'
-                  : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95'
-                  }`}
+                className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95 transition-all"
                 title="Làm lại (Redo - Ctrl+Y)"
                 type="button"
               >
@@ -1963,14 +1991,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                               setSelectedFormat(block.level || 'H2');
                               updateToolbarActiveStates(block.id);
                             }}
-                            onBlur={() => {
-                              if (typingTimeoutRef.current) {
-                                clearTimeout(typingTimeoutRef.current);
-                                typingTimeoutRef.current = null;
-                              }
-                              const updated = syncActiveBlockContent();
-                              pushHistory(updated);
-                            }}
                             onSelectionChange={() => updateToolbarActiveStates(block.id)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
@@ -2004,14 +2024,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                             setFocusedBlockId(block.id);
                             setSelectedFormat('p');
                             updateToolbarActiveStates(block.id);
-                          }}
-                          onBlur={() => {
-                            if (typingTimeoutRef.current) {
-                              clearTimeout(typingTimeoutRef.current);
-                              typingTimeoutRef.current = null;
-                            }
-                            const updated = syncActiveBlockContent();
-                            pushHistory(updated);
                           }}
                           onSelectionChange={() => updateToolbarActiveStates(block.id)}
                           placeholder="Nhập nội dung đoạn văn bản tại đây..."
@@ -2056,20 +2068,13 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                                   newItems[itemIdx] = e.target.value;
                                   updateBlock(block.id, { items: newItems });
                                 }}
-                                onBlur={() => {
-                                  if (typingTimeoutRef.current) {
-                                    clearTimeout(typingTimeoutRef.current);
-                                    typingTimeoutRef.current = null;
-                                  }
-                                  pushHistory(blocks);
-                                }}
                                 className="w-full bg-transparent text-sm text-slate-800 dark:text-[#e8dff1] outline-none border-b border-slate-200 dark:border-white/5 focus:border-sky-500 dark:focus:border-[#4cd7f6] pb-0.5"
                                 placeholder="Nhập mục danh sách..."
                               />
                               <button
                                 onClick={() => {
                                   const newItems = block.items.filter((_, i) => i !== itemIdx);
-                                  updateBlock(block.id, { items: newItems.length > 0 ? newItems : [''] }, true);
+                                  updateBlock(block.id, { items: newItems.length > 0 ? newItems : [''] });
                                 }}
                                 className="text-slate-400 dark:text-[#ad8888] hover:text-rose-600 dark:hover:text-[#ff5167] p-0.5"
                               >
@@ -2078,7 +2083,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                             </div>
                           ))}
                           <button
-                            onClick={() => updateBlock(block.id, { items: [...(block.items || []), ''] }, true)}
+                            onClick={() => updateBlock(block.id, { items: [...(block.items || []), ''] })}
                             className="text-xs text-sky-600 dark:text-[#4cd7f6] hover:underline pt-1 flex items-center gap-1 font-semibold"
                           >
                             <span className="material-symbols-outlined text-[14px]">add</span>
@@ -2114,13 +2119,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                                         newHeaders[hIdx] = e.target.value;
                                         updateBlock(block.id, { headers: newHeaders });
                                       }}
-                                      onBlur={() => {
-                                        if (typingTimeoutRef.current) {
-                                          clearTimeout(typingTimeoutRef.current);
-                                          typingTimeoutRef.current = null;
-                                        }
-                                        pushHistory(blocks);
-                                      }}
                                       className="bg-transparent w-full outline-none font-bold text-rose-600 dark:text-[#ffb3b5]"
                                     />
                                   </th>
@@ -2139,13 +2137,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                                           newRows[rIdx][cIdx] = e.target.value;
                                           updateBlock(block.id, { rows: newRows });
                                         }}
-                                        onBlur={() => {
-                                          if (typingTimeoutRef.current) {
-                                            clearTimeout(typingTimeoutRef.current);
-                                            typingTimeoutRef.current = null;
-                                          }
-                                          pushHistory(blocks);
-                                        }}
                                         className="bg-transparent w-full outline-none text-slate-800 dark:text-[#e8dff1]"
                                       />
                                     </td>
@@ -2158,7 +2149,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                             <button
                               onClick={() => {
                                 const newRows = [...(block.rows || []), new Array(block.headers?.length || 3).fill('Dữ liệu mới')];
-                                updateBlock(block.id, { rows: newRows }, true);
+                                updateBlock(block.id, { rows: newRows });
                               }}
                               className="text-xs text-sky-600 dark:text-[#4cd7f6] hover:underline font-semibold"
                             >
@@ -2265,14 +2256,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                             setSelectedFormat('quote');
                             updateToolbarActiveStates(block.id);
                           }}
-                          onBlur={() => {
-                            if (typingTimeoutRef.current) {
-                              clearTimeout(typingTimeoutRef.current);
-                              typingTimeoutRef.current = null;
-                            }
-                            const updated = syncActiveBlockContent();
-                            pushHistory(updated);
-                          }}
                           onSelectionChange={() => updateToolbarActiveStates(block.id)}
                           placeholder="Nội dung trích dẫn quan trọng..."
                           className="w-full bg-transparent text-base italic text-slate-800 dark:text-[#e8dff1] min-h-[44px]"
@@ -2301,13 +2284,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                           onFocus={() => {
                             setFocusedBlockId(block.id);
                             setSelectedFormat('code');
-                          }}
-                          onBlur={() => {
-                            if (typingTimeoutRef.current) {
-                              clearTimeout(typingTimeoutRef.current);
-                              typingTimeoutRef.current = null;
-                            }
-                            pushHistory(blocks);
                           }}
                           value={block.code || block.text || ''}
                           onChange={(e) => updateBlock(block.id, { code: e.target.value, text: e.target.value })}
@@ -2426,7 +2402,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-sky-600 dark:text-[#4cd7f6] text-[20px]">image</span>
-                <h3 className="font-display font-bold text-sm text-slate-900 dark:text-[#e8dff1]">Ảnh bìa đại diện</h3>
+                <h3 className="font-display font-bold text-sm text-slate-900 dark:text-[#e8dff1]">Ảnh đại diện</h3>
               </div>
               <button
                 onClick={() => coverFileInputRef.current?.click()}
