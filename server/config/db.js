@@ -10,17 +10,30 @@ if (process.platform === 'win32') {
   }
 }
 
+// Serverless-ready MongoDB connection caching
+let cachedPromise = null;
+
 export const connectDB = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return true;
+  }
+
+  if (cachedPromise) {
+    return cachedPromise;
+  }
+
   const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/dudi_blog';
-  try {
-    const conn = await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 8000,
-    });
+  cachedPromise = mongoose.connect(uri, {
+    serverSelectionTimeoutMS: 8000,
+  }).then((conn) => {
     console.log(`[MongoDB] Kết nối thành công tới: ${conn.connection.host}/${conn.connection.name}`);
     return true;
-  } catch (error) {
+  }).catch((error) => {
+    cachedPromise = null;
     console.error(`[MongoDB] Lỗi kết nối: ${error.message}`);
     console.warn(`[MongoDB] Vui lòng kiểm tra lại dịch vụ MongoDB hoặc cấu hình MONGODB_URI trong file .env`);
     return false;
-  }
+  });
+
+  return cachedPromise;
 };
