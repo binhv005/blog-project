@@ -193,7 +193,7 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
 
                     {/* Post Title */}
                     <h3 
-                      onClick={() => selectPost(post.id)}
+                      onClick={() => selectPost(post.id, true, post.status !== 'published')}
                       className="font-display font-semibold text-sm sm:text-base text-slate-900 dark:text-on-surface group-hover:text-sky-600 dark:group-hover:text-[#4cd7f6] transition-colors line-clamp-2 break-words cursor-pointer hover:underline leading-snug"
                       title={post.title}
                     >
@@ -216,9 +216,9 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
                 <div className="flex items-center gap-1.5 sm:gap-2 self-end sm:self-center flex-shrink-0 pt-2 sm:pt-0 border-t border-slate-200 dark:border-[#2c2835]/40 sm:border-t-0 w-full sm:w-auto justify-end">
                   {/* View post on blog */}
                   <button
-                    onClick={() => selectPost(post.id)}
+                    onClick={() => selectPost(post.id, true, post.status !== 'published')}
                     className="p-1.5 sm:p-2 rounded-xl text-slate-500 dark:text-on-surface-variant hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#15111d] transition-colors border border-transparent hover:border-sky-300 dark:hover:border-[#4cd7f6]/30"
-                    title="Xem trước bài viết trên Blog"
+                    title={post.status === 'published' ? 'Xem bài viết trên Blog' : 'Xem trước bản nháp trên Blog'}
                   >
                     <span className="material-symbols-outlined text-[18px]">visibility</span>
                   </button>

@@ -177,6 +177,29 @@ const INITIAL_POSTS = [
 
 const STORAGE_KEY = 'dudi_software_blog_posts_v1';
 
+// Helper to extract slug or ID from browser URL
+export const getSlugFromBrowserUrl = () => {
+  if (typeof window === 'undefined') return null;
+  const pathname = window.location.pathname;
+  const hash = window.location.hash.replace(/^#\/?/, '');
+  const searchParams = new URLSearchParams(window.location.search);
+  const querySlug = searchParams.get('slug') || searchParams.get('id');
+
+  if (querySlug) return querySlug;
+
+  const blogMatch = pathname.match(/^\/blog\/(.+)/i);
+  if (blogMatch && blogMatch[1]) {
+    return decodeURIComponent(blogMatch[1]);
+  }
+
+  const hashBlogMatch = hash.match(/^blog\/(.+)/i);
+  if (hashBlogMatch && hashBlogMatch[1]) {
+    return decodeURIComponent(hashBlogMatch[1]);
+  }
+
+  return null;
+};
+
 export function BlogProvider({ children, onNavigate }) {
   const [posts, setPosts] = useState(() => {
     try {
@@ -191,11 +214,129 @@ export function BlogProvider({ children, onNavigate }) {
     return INITIAL_POSTS;
   });
 
-  const [activePostId, setActivePostId] = useState('post-1');
+  const [activePostId, setActivePostId] = useState(() => {
+    const urlSlug = getSlugFromBrowserUrl();
+    if (urlSlug) {
+      const matched = INITIAL_POSTS.find((p) => p.slug === urlSlug || p.id === urlSlug || p._id === urlSlug);
+      if (matched && (matched.status || 'published') === 'published') return matched.id;
+    }
+    return 'post-1';
+  });
+
+  const [postStatusError, setPostStatusError] = useState(() => {
+    const urlSlug = getSlugFromBrowserUrl();
+    const isPreview = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('preview') === 'true';
+    if (urlSlug) {
+      const matched = INITIAL_POSTS.find((p) => p.slug === urlSlug || p.id === urlSlug || p._id === urlSlug);
+      if (!matched) return { type: 'not_found', slug: urlSlug };
+      if ((matched.status || 'published') !== 'published' && !isPreview) {
+        return { type: 'draft', post: matched, slug: urlSlug };
+      }
+    }
+    return null;
+  });
+
+  const [temporaryPreviewPost, setTemporaryPreviewPost] = useState(null);
+  const [isPreviewMode, setIsPreviewMode] = useState(() => {
+    return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('preview') === 'true';
+  });
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Tất cả');
   const [isLoading, setIsLoading] = useState(true);
   const [isDatabaseConnected, setIsDatabaseConnected] = useState(false);
+
+  // Evaluate active post and draft restriction from browser route
+  const evaluateActivePostFromRoute = (postsList = posts) => {
+    if (window.location.pathname.startsWith('/admin')) {
+      setPostStatusError(null);
+      return;
+    }
+
+    const urlSlug = getSlugFromBrowserUrl();
+    const isPreview = (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('preview') === 'true') || Boolean(temporaryPreviewPost);
+    const published = postsList.filter((p) => (p.status || 'published') === 'published');
+
+    if (temporaryPreviewPost) {
+      setPostStatusError(null);
+      setActivePostId(temporaryPreviewPost.id);
+      setIsPreviewMode(true);
+      return;
+    }
+
+    if (urlSlug) {
+      const matched = postsList.find(
+        (p) => p.slug === urlSlug || p.id === urlSlug || p._id === urlSlug
+      );
+
+      if (!matched) {
+        setPostStatusError({ type: 'not_found', slug: urlSlug });
+        setActivePostId(null);
+        setIsPreviewMode(false);
+        return;
+      }
+
+      if ((matched.status || 'published') !== 'published') {
+        if (isPreview) {
+          // Allowed in PREVIEW mode
+          setPostStatusError(null);
+          setActivePostId(matched.id);
+          setIsPreviewMode(true);
+          return;
+        }
+
+        // DRAFT post -> block access via public URL
+        setPostStatusError({ type: 'draft', post: matched, slug: urlSlug });
+        setActivePostId(null);
+        setIsPreviewMode(false);
+        return;
+      }
+
+      // Valid published post
+      setPostStatusError(null);
+      setActivePostId(matched.id);
+      setIsPreviewMode(isPreview);
+    } else {
+      setPostStatusError(null);
+      setIsPreviewMode(false);
+      if (!activePostId || !published.some((p) => p.id === activePostId)) {
+        if (published.length > 0) {
+          setActivePostId(published[0].id);
+        }
+      }
+    }
+  };
+
+  // Clear preview post state and reset URL
+  const clearPreviewPost = () => {
+    setTemporaryPreviewPost(null);
+    setIsPreviewMode(false);
+    if (typeof window !== 'undefined' && window.location.search.includes('preview=true')) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('preview');
+      window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+    }
+  };
+
+  // Sync active post from URL on initial load and when posts list updates
+  useEffect(() => {
+    if (posts.length > 0) {
+      evaluateActivePostFromRoute(posts);
+    }
+  }, [posts, temporaryPreviewPost]);
+
+  // Handle browser Back / Forward history navigation
+  useEffect(() => {
+    const handleUrlChange = () => {
+      evaluateActivePostFromRoute(posts);
+    };
+    window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('hashchange', handleUrlChange);
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('hashchange', handleUrlChange);
+    };
+  }, [posts, temporaryPreviewPost]);
 
   // Fetch posts from MongoDB API
   const fetchPostsFromDB = async () => {
@@ -206,6 +347,7 @@ export function BlogProvider({ children, onNavigate }) {
         if (result.success && Array.isArray(result.data) && result.data.length > 0) {
           setPosts(result.data);
           setIsDatabaseConnected(true);
+          evaluateActivePostFromRoute(result.data);
           return;
         }
       }
@@ -255,25 +397,92 @@ export function BlogProvider({ children, onNavigate }) {
     }
   }, [posts]);
 
-  // Current active post
-  const activePost = posts.find((p) => p.id === activePostId) || posts[0] || INITIAL_POSTS[0];
+  // Published posts list
+  const publishedPosts = posts.filter((p) => (p.status || 'published') === 'published');
 
-  // Select a post and navigate to blog
-  const handleSelectPost = (id) => {
-    setActivePostId(id);
-    // Increment view count optimistically
-    setPosts((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, views: (p.views || 0) + 1 } : p))
-    );
-    // Sync view count to MongoDB
-    fetch(`/api/posts/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ views: (activePost?.views || 0) + 1 })
-    }).catch(() => {});
+  // Current active post (Supports temporaryPreviewPost during admin live preview)
+  const activePost = postStatusError
+    ? null
+    : (temporaryPreviewPost || posts.find((p) => p.id === activePostId) || publishedPosts.find((p) => p.id === activePostId) || publishedPosts[0] || posts[0] || null);
+
+  // Dynamically update document title for SEO and user experience
+  useEffect(() => {
+    if (window.location.pathname.startsWith('/admin')) return;
+
+    if (isPreviewMode) {
+      document.title = `[Xem trước] ${activePost?.title || 'Bài viết'} | DUDI Software`;
+    } else if (postStatusError?.type === 'draft') {
+      document.title = 'Bài viết chưa xuất bản (Bản nháp) | DUDI Software';
+    } else if (postStatusError?.type === 'not_found') {
+      document.title = 'Không tìm thấy bài viết (404) | DUDI Software';
+    } else if (activePost?.title) {
+      document.title = `${activePost.title} | DUDI Software Blog`;
+    }
+  }, [activePost, postStatusError, isPreviewMode]);
+
+  // Select a post by ID or Slug, updates URL and navigates (supports isPreview)
+  const handleSelectPost = (idOrSlug, pushState = true, isPreview = false) => {
+    const matched = posts.find((p) => p.id === idOrSlug || p.slug === idOrSlug || p._id === idOrSlug);
+    const targetSlug = matched ? (matched.slug || matched.id) : idOrSlug;
+
+    if (!matched) {
+      setPostStatusError({ type: 'not_found', slug: idOrSlug });
+      setActivePostId(null);
+      setIsPreviewMode(false);
+      if (pushState && targetSlug) {
+        const newPath = `/blog/${targetSlug}`;
+        if (window.location.pathname !== newPath) {
+          window.history.pushState({ slug: targetSlug, view: 'blog' }, '', newPath);
+        }
+      }
+      if (onNavigate) onNavigate('blog', targetSlug);
+      return;
+    }
+
+    const isPublished = (matched.status || 'published') === 'published';
+
+    if (!isPublished && !isPreview) {
+      // Draft post -> block public access and show draft notice
+      setPostStatusError({ type: 'draft', post: matched, slug: targetSlug });
+      setActivePostId(null);
+      setIsPreviewMode(false);
+      if (pushState && targetSlug) {
+        const newPath = `/blog/${targetSlug}`;
+        if (window.location.pathname !== newPath) {
+          window.history.pushState({ slug: targetSlug, view: 'blog' }, '', newPath);
+        }
+      }
+      if (onNavigate) onNavigate('blog', targetSlug);
+      return;
+    }
+
+    // Allowed (Published OR Preview)
+    setPostStatusError(null);
+    setActivePostId(matched.id);
+    setIsPreviewMode(Boolean(isPreview || !isPublished));
+
+    // Increment view count optimistically only for published posts viewed publicly
+    if (isPublished && !isPreview) {
+      setPosts((prev) =>
+        prev.map((p) => (p.id === matched.id ? { ...p, views: (p.views || 0) + 1 } : p))
+      );
+
+      fetch(`/api/posts/${matched.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ views: (matched.views || 0) + 1 })
+      }).catch(() => {});
+    }
+
+    if (pushState && targetSlug) {
+      const newPath = isPreview ? `/blog/${targetSlug}?preview=true` : `/blog/${targetSlug}`;
+      if (window.location.pathname !== newPath) {
+        window.history.pushState({ slug: targetSlug, view: 'blog', preview: isPreview }, '', newPath);
+      }
+    }
 
     if (onNavigate) {
-      onNavigate('blog');
+      onNavigate('blog', isPreview ? `${targetSlug}?preview=true` : targetSlug);
     }
   };
 
@@ -429,7 +638,6 @@ export function BlogProvider({ children, onNavigate }) {
 
   // Stats calculation
   const totalPosts = posts.length;
-  const publishedPosts = posts.filter((p) => p.status === 'published');
   const draftPosts = posts.filter((p) => p.status === 'draft');
   const totalViews = posts.reduce((acc, p) => acc + (p.views || 0), 0);
 
@@ -455,6 +663,13 @@ export function BlogProvider({ children, onNavigate }) {
         setSearchQuery,
         selectedCategory,
         setSelectedCategory,
+        postStatusError,
+        setPostStatusError,
+        isPreviewMode,
+        setIsPreviewMode,
+        temporaryPreviewPost,
+        setTemporaryPreviewPost,
+        clearPreviewPost,
         publishedPosts,
         draftPosts,
         popularPosts,

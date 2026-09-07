@@ -5,34 +5,60 @@ import { BlogProvider } from './context/BlogContext';
 import { ToastProvider } from './context/ToastContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 
-function AppContent() {
-  // Check URL hash or default to 'blog'
-  const getInitialView = () => {
-    const hash = window.location.hash.replace('#', '');
-    if (['blog', 'admin'].includes(hash)) {
-      return hash;
-    }
-    return 'blog';
-  };
+function parseCurrentRoute() {
+  const pathname = window.location.pathname;
+  const hash = window.location.hash.replace(/^#\/?/, '');
 
-  const [currentView, setCurrentView] = useState(getInitialView);
+  if (pathname.startsWith('/admin') || hash.startsWith('admin')) {
+    return { view: 'admin' };
+  }
+  return { view: 'blog' };
+}
+
+function AppContent() {
+  const [currentView, setCurrentView] = useState(() => parseCurrentRoute().view);
   const { isDarkMode, toggleTheme } = useTheme();
 
-  const handleNavigate = (view) => {
+  const handleNavigate = (view, slugOrSub = null) => {
     setCurrentView(view);
-    window.location.hash = view;
+    if (view === 'admin') {
+      let targetPath = '/admin/posts';
+      if (slugOrSub) {
+        targetPath = slugOrSub.startsWith('/admin') ? slugOrSub : `/admin/${slugOrSub.replace(/^\//, '')}`;
+      } else if (window.location.pathname.startsWith('/admin')) {
+        targetPath = window.location.pathname;
+      }
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState({ view: 'admin' }, '', targetPath);
+      }
+    } else {
+      if (slugOrSub) {
+        const cleanSlug = slugOrSub.startsWith('/blog/') ? slugOrSub.replace('/blog/', '') : slugOrSub;
+        const targetPath = `/blog/${cleanSlug}`;
+        if (window.location.pathname !== targetPath) {
+          window.history.pushState({ view: 'blog', slug: cleanSlug }, '', targetPath);
+        }
+      } else {
+        if (!window.location.pathname.startsWith('/blog') && window.location.pathname !== '/') {
+          window.history.pushState({ view: 'blog' }, '', '/blog');
+        }
+      }
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   useEffect(() => {
-    const onHashChange = () => {
-      const hash = window.location.hash.replace('#', '');
-      if (['blog', 'admin'].includes(hash)) {
-        setCurrentView(hash);
-      }
+    const handlePopState = () => {
+      const route = parseCurrentRoute();
+      setCurrentView(route.view);
     };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handlePopState);
+    };
   }, []);
 
   return (

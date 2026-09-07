@@ -221,10 +221,11 @@ const readFileAsBase64 = (file) => {
 };
 
 export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
-  const { createPost, updatePost, selectPost } = useBlog();
+  const { createPost, updatePost, selectPost, setTemporaryPreviewPost } = useBlog();
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   const coverFileInputRef = useRef(null);
+  const titleTextareaRef = useRef(null);
   const [targetBlockIndex, setTargetBlockIndex] = useState(null);
 
   // Publish Success Modal State
@@ -234,6 +235,14 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
   // Document State
   const [title, setTitle] = useState(postToEdit?.title || '');
+
+  // Auto-resize title textarea to avoid truncation of long titles
+  useEffect(() => {
+    if (titleTextareaRef.current) {
+      titleTextareaRef.current.style.height = 'auto';
+      titleTextareaRef.current.style.height = `${Math.max(48, titleTextareaRef.current.scrollHeight)}px`;
+    }
+  }, [title]);
   const [summary, setSummary] = useState(postToEdit?.summary || '');
   const [category, setCategory] = useState(postToEdit?.category || 'Công nghệ & Kiến trúc phần mềm');
   const [authorName, setAuthorName] = useState(postToEdit?.author?.name || 'Alex Vũ (Super Admin)');
@@ -297,6 +306,10 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   // History State for Undo / Redo
   const [history, setHistory] = useState([getInitialBlocks()]);
   const [historyIndex, setHistoryIndex] = useState(0);
+
+  // Saving lock state to prevent multi-clicking publish
+  const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
 
   // Active focus & selection tracking
   const [focusedBlockId, setFocusedBlockId] = useState(null);
@@ -1230,15 +1243,15 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     });
   };
 
-  // Insert image directly into text/paragraph at cursor with filename caption underneath
-  const insertImageAtCursor = (imageUrl, caption = '') => {
+  // Insert image directly into text/paragraph at cursor with caption and automatically add a new paragraph below for continued writing
+  const insertImageAtCursor = (imageUrl, caption = '', targetIdx = null) => {
     const cleanCaption = caption || '';
     const imgHtml = cleanCaption
-      ? `<figure class="my-4 text-center block"><img src="${imageUrl}" alt="${cleanCaption}" class="max-h-[420px] max-w-full rounded-xl object-cover block mx-auto shadow-lg" /><figcaption class="text-xs text-[#ad8888] italic text-center mt-1.5 font-medium">${cleanCaption}</figcaption></figure>`
-      : `<img src="${imageUrl}" alt="Hình ảnh bài viết" class="my-3 max-h-[420px] max-w-full rounded-xl object-cover block mx-auto shadow-lg" />`;
+      ? `<figure class="my-4 text-center block" contenteditable="false"><img src="${imageUrl}" alt="${cleanCaption}" class="max-h-[420px] max-w-full rounded-xl object-cover block mx-auto shadow-lg" /><figcaption class="text-xs text-[#ad8888] italic text-center mt-1.5 font-medium" contenteditable="true">${cleanCaption}</figcaption></figure>`
+      : `<img src="${imageUrl}" alt="Hình ảnh bài viết" class="my-3 max-h-[420px] max-w-full rounded-xl object-cover block mx-auto shadow-lg" contenteditable="false" />`;
 
     const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0 && focusedBlockId) {
+    if (selection && selection.rangeCount > 0 && focusedBlockId && targetIdx === null) {
       try {
         const range = selection.getRangeAt(0);
         range.deleteContents();
@@ -1247,8 +1260,17 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         const imgNode = tempDiv.firstChild;
         range.insertNode(imgNode);
 
+        // Add a new empty paragraph immediately below the inserted image so the user can write text right away
+        const afterP = document.createElement('p');
+        afterP.innerHTML = '<br>';
+        if (imgNode.nextSibling) {
+          imgNode.parentNode.insertBefore(afterP, imgNode.nextSibling);
+        } else {
+          imgNode.parentNode.appendChild(afterP);
+        }
+
         const newRange = document.createRange();
-        newRange.setStartAfter(imgNode);
+        newRange.setStart(afterP, 0);
         newRange.collapse(true);
         selection.removeAllRanges();
         selection.addRange(newRange);
@@ -1259,19 +1281,36 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       } catch (_) { }
     }
 
-    const activeIdx = getActiveIndex();
-    const currentBlock = blocks[activeIdx];
-    if (currentBlock && currentBlock.type === 'paragraph') {
-      const newText = (currentBlock.text || '') + imgHtml;
-      updateBlock(currentBlock.id, { text: newText });
-    } else {
-      insertBlockAt(activeIdx, {
-        id: `p-${Date.now()}`,
-        type: 'paragraph',
-        text: imgHtml
-      });
-    }
-    pushHistory(blocks);
+    const activeIdx = targetIdx !== null ? targetIdx : (targetBlockIndex !== null ? targetBlockIndex : getActiveIndex());
+    const nextParagraphId = `p-${Date.now() + 1}`;
+    const newImageBlock = {
+      id: `img-${Date.now()}`,
+      type: 'image',
+      url: imageUrl,
+      caption: cleanCaption || 'Hình ảnh minh họa (.webp)'
+    };
+    const newParagraphBlock = {
+      id: nextParagraphId,
+      type: 'paragraph',
+      text: ''
+    };
+
+    setBlocks((prev) => {
+      const newBlocks = [...prev];
+      const insertAt = activeIdx >= 0 && activeIdx < newBlocks.length ? activeIdx + 1 : newBlocks.length;
+      newBlocks.splice(insertAt, 0, newImageBlock, newParagraphBlock);
+      pushHistory(newBlocks);
+      return newBlocks;
+    });
+
+    setTargetBlockIndex(null);
+    setFocusedBlockId(nextParagraphId);
+
+    setTimeout(() => {
+      if (inputRefs.current[nextParagraphId]) {
+        inputRefs.current[nextParagraphId].focus();
+      }
+    }, 80);
   };
 
   const triggerImageUploadAt = (idx = getActiveIndex()) => {
@@ -1463,10 +1502,15 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
   // Save / Publish
   const handleSave = async (status = 'published') => {
+    if (isSavingRef.current || isSaving) return;
+
     if (!title.trim()) {
       toast.warning('Vui lòng nhập tiêu đề bài viết!');
       return;
     }
+
+    isSavingRef.current = true;
+    setIsSaving(true);
 
     const contentSections = [];
     let currentSection = { heading: '', text: '' };
@@ -1518,6 +1562,11 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     } catch (err) {
       console.warn('Lỗi lưu bài viết:', err);
       resultPost = { id: `post-${Date.now()}`, ...postData };
+    } finally {
+      setTimeout(() => {
+        isSavingRef.current = false;
+        setIsSaving(false);
+      }, 1000);
     }
 
     if (status === 'published') {
@@ -1528,30 +1577,61 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     }
   };
 
-  const handlePreview = async () => {
+  const handlePreview = () => {
     if (!title.trim()) {
       toast.warning('Vui lòng nhập tiêu đề bài viết trước khi xem trước!');
       return;
     }
 
-    const firstImgBlock = blocks.find((b) => b.type === 'image');
+    const contentSections = [];
+    let currentSection = { heading: '', text: '' };
 
-    if (postToEdit) {
-      await updatePost(postToEdit.id, { title, summary, blocks, category });
-      selectPost(postToEdit.id);
-    } else {
-      const created = await createPost({
-        title,
-        slug: slug || 'preview-post',
-        category,
-        summary,
-        blocks,
-        coverImage: coverImage || firstImgBlock?.url || 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80&fm=webp',
-        tags: tags.length > 0 ? tags : ['#DUDISoftware'],
-        status: 'draft',
-        content: [{ heading: 'Nội dung xem trước', text: summary || 'Nội dung đang được soạn thảo...' }]
-      });
-      selectPost(created.id);
+    blocks.forEach((block) => {
+      if (block.type === 'heading') {
+        if (currentSection.text || currentSection.heading) {
+          contentSections.push(currentSection);
+        }
+        currentSection = { heading: block.text, text: '' };
+      } else if (block.type === 'paragraph') {
+        currentSection.text = currentSection.text ? `${currentSection.text}\n\n${block.text}` : block.text;
+      } else if (block.type === 'quote') {
+        currentSection.quote = block.text;
+        currentSection.quoteAuthor = block.author || '';
+      }
+    });
+    if (currentSection.text || currentSection.heading) {
+      contentSections.push(currentSection);
+    }
+
+    const firstImgBlock = blocks.find((b) => b.type === 'image');
+    const targetSlug = slug || title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+
+    const previewData = {
+      id: postToEdit?.id || `preview-${Date.now()}`,
+      title,
+      slug: targetSlug,
+      category,
+      subCategory: category,
+      tag: (category || 'TIN TỨC').toUpperCase(),
+      summary: summary || 'Tóm tắt bài viết xem trước...',
+      blocks,
+      coverImage: coverImage || firstImgBlock?.url || 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80&fm=webp',
+      tags: tags.length > 0 ? tags : ['#DUDISoftware', '#Preview'],
+      status: postToEdit?.status || 'draft',
+      author: {
+        name: authorName.split(' (')[0],
+        role: 'Tác giả',
+        avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBqw-vduZVOWhbLaDn1DaU18qakFhiVY0XwArz4Szdi66WNXtlVf0MwMXr_t5ymSlCfZPL6F77-B4U63hFCIow2ZJ7J3pYtzELJ07_ssO-Xek7q1cJevJ_geMQt_Iu5yMz5BoMjitCGWEYWAVn3Cj0b_GJsxeYUUGXS7krpQhKJh_NTXhtL6bNtlhtjU_yMoEQn5o-pn0Fn8djGAw9EOJYMJXMu-pfz6WeCc-iNuKXmqOcCB8eQRjHTcA'
+      },
+      date: 'Bản xem trước (Live Preview)',
+      readTime: `${Math.max(1, Math.ceil(wordCount / 200))} phút đọc`,
+      views: postToEdit?.views || 0,
+      content: contentSections.length > 0 ? contentSections : [{ heading: 'Nội dung', text: summary || 'Đang soạn thảo...' }]
+    };
+
+    setTemporaryPreviewPost(previewData);
+    if (onNavigate) {
+      onNavigate('blog', `${targetSlug}?preview=true`);
     }
   };
 
@@ -1611,7 +1691,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
           <button
             onClick={handlePreview}
-            className="group flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-[#2c2835] text-slate-800 dark:text-[#e8dff1] hover:bg-slate-200 dark:hover:bg-[#3c3745] transition-all shadow-sm text-xs font-semibold border border-slate-200 dark:border-transparent"
+            disabled={isSaving}
+            className="group flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-[#2c2835] text-slate-800 dark:text-[#e8dff1] hover:bg-slate-200 dark:hover:bg-[#3c3745] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm text-xs font-semibold border border-slate-200 dark:border-transparent"
             type="button"
             title="Xem trước trên Blog"
           >
@@ -1623,7 +1704,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
           <button
             onClick={() => handleSave('draft')}
-            className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-[#2c2835] text-slate-700 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-[#e8dff1] hover:bg-slate-200 dark:hover:bg-[#3c3745] transition-all text-xs font-semibold border border-slate-200 dark:border-transparent"
+            disabled={isSaving}
+            className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-[#2c2835] text-slate-700 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-[#e8dff1] hover:bg-slate-200 dark:hover:bg-[#3c3745] disabled:opacity-50 disabled:cursor-not-allowed transition-all text-xs font-semibold border border-slate-200 dark:border-transparent"
             type="button"
             title="Lưu bản nháp"
           >
@@ -1633,11 +1715,14 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
           <button
             onClick={() => handleSave('published')}
-            className="relative group flex items-center gap-1 px-3 sm:px-4 py-1.5 rounded-lg bg-gradient-to-r from-[#ff2d55] to-[#ff5167] text-white text-xs font-bold tracking-wide shadow-[0_0_20px_rgba(255,45,85,0.45)] hover:shadow-[0_0_28px_rgba(255,45,85,0.65)] hover:brightness-110 active:translate-y-px transition-all"
+            disabled={isSaving}
+            className="relative group flex items-center gap-1 px-3 sm:px-4 py-1.5 rounded-lg bg-gradient-to-r from-[#ff2d55] to-[#ff5167] text-white text-xs font-bold tracking-wide shadow-[0_0_20px_rgba(255,45,85,0.45)] hover:shadow-[0_0_28px_rgba(255,45,85,0.65)] hover:brightness-110 active:translate-y-px disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none transition-all"
             type="button"
           >
-            <span className="material-symbols-outlined text-[16px]">rocket_launch</span>
-            <span>Xuất bản</span>
+            <span className={`material-symbols-outlined text-[16px] ${isSaving ? 'animate-spin' : ''}`}>
+              {isSaving ? 'progress_activity' : 'rocket_launch'}
+            </span>
+            <span>{isSaving ? 'Đang xuất bản...' : 'Xuất bản'}</span>
           </button>
 
           <button
@@ -2004,12 +2089,17 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
               {/* Document Title Input Field */}
               <div className="pt-2 pb-4">
-                <input
-                  type="text"
+                <textarea
+                  ref={titleTextareaRef}
+                  rows={1}
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  onChange={(e) => {
+                    setTitle(e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = `${Math.max(48, e.target.scrollHeight)}px`;
+                  }}
                   onFocus={() => setFocusedBlockId('doc-title')}
-                  className="w-full bg-transparent text-2xl md:text-3xl lg:text-4xl text-slate-900 dark:text-white font-display font-bold placeholder-slate-400 dark:placeholder-[#9e8eb3] outline-none leading-tight tracking-tight focus:placeholder:opacity-30 transition-all text-left"
+                  className="w-full bg-transparent text-2xl md:text-3xl lg:text-4xl text-slate-900 dark:text-white font-display font-bold placeholder-slate-400 dark:placeholder-[#9e8eb3] outline-none leading-snug tracking-tight focus:placeholder:opacity-30 transition-all text-left resize-none overflow-hidden break-words block min-h-[48px]"
                   placeholder="Nhập tiêu đề bài viết tại đây..."
                 />
               </div>
@@ -2345,35 +2435,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                       </div>
                     )}
 
-                    {/* In-Between Insertion Actions */}
-                    <div className="flex items-center justify-center py-2 opacity-30 hover:opacity-100 transition-opacity my-1">
-                      <div className="h-px bg-slate-200 dark:bg-[#2c2835] flex-1"></div>
-                      <div className="flex items-center gap-1.5 px-3 bg-white dark:bg-[#1e1a26] py-0.5 rounded-full border border-slate-200 dark:border-[#373340] shadow-sm">
-                        <button
-                          onClick={() => triggerImageUploadAt(idx)}
-                          className="flex items-center gap-1 text-[11px] font-semibold text-sky-600 dark:text-[#4cd7f6] hover:text-sky-700 dark:hover:text-white px-2 py-0.5 rounded hover:bg-slate-100 dark:hover:bg-[#2c2835] transition-colors"
-                          title="Chèn hình ảnh vào đúng vị trí này"
-                        >
-                          <span className="material-symbols-outlined text-[14px]">add_photo_alternate</span>
-                          <span>Chèn ảnh WebP</span>
-                        </button>
-                        <span className="text-slate-300 dark:text-[#373340]">•</span>
-                        <button
-                          onClick={() => insertBlockAt(idx, { id: `p-${Date.now()}`, type: 'paragraph', text: '' })}
-                          className="text-[11px] font-medium text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white px-1.5 py-0.5 rounded hover:bg-slate-100 dark:hover:bg-[#2c2835] transition-colors"
-                        >
-                          + Đoạn văn
-                        </button>
-                        <span className="text-slate-300 dark:text-[#373340]">•</span>
-                        <button
-                          onClick={() => insertBlockAt(idx, { id: `h-${Date.now()}`, type: 'heading', text: '' })}
-                          className="text-[11px] font-medium text-rose-600 dark:text-[#ffb3b5] hover:text-rose-700 dark:hover:text-white px-1.5 py-0.5 rounded hover:bg-slate-100 dark:hover:bg-[#2c2835] transition-colors"
-                        >
-                          + Đề mục
-                        </button>
-                      </div>
-                      <div className="h-px bg-slate-200 dark:bg-[#2c2835] flex-1"></div>
-                    </div>
                   </div>
                 ))}
               </div>

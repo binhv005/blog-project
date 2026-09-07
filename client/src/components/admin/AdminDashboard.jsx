@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import AdminSidebar from './AdminSidebar';
 import AdminHeader from './AdminHeader';
 import ViewsChartCard from './ViewsChartCard';
@@ -9,21 +9,143 @@ import PostsManager from './PostsManager';
 import AdminEditor from './AdminEditor';
 import { useBlog } from '../../context/BlogContext';
 
+// Parse route details from browser URL
+const parseAdminRoute = (postsList = []) => {
+  const pathname = window.location.pathname;
+  const hash = window.location.hash.replace(/^#\/?/, '');
+  const path = pathname.startsWith('/admin') ? pathname : (hash.startsWith('admin') ? `/${hash}` : '');
+
+  // 1. New / Create post route
+  if (/^\/admin\/(new|create)/i.test(path)) {
+    return { subView: 'editor', editingPost: null, slugOrId: null, activeTab: 'posts' };
+  }
+
+  // 2. Edit existing post route: /admin/edit/:slugOrId
+  const editMatch = path.match(/^\/admin\/edit\/(.+)/i);
+  if (editMatch) {
+    const slugOrId = decodeURIComponent(editMatch[1]);
+    const matched = postsList.find(
+      (p) => p.slug === slugOrId || p.id === slugOrId || p._id === slugOrId
+    );
+    return { subView: 'editor', editingPost: matched || null, slugOrId, activeTab: 'posts' };
+  }
+
+  // 3. Overview / Dashboard metrics route
+  if (/^\/admin\/(overview|dashboard)/i.test(path)) {
+    return { subView: 'overview', editingPost: null, slugOrId: null, activeTab: 'dashboard' };
+  }
+
+  // 4. Default Posts List Manager route
+  return { subView: 'list', editingPost: null, slugOrId: null, activeTab: 'posts' };
+};
+
 export default function AdminDashboard({ onNavigate }) {
-  const [activeTab, setActiveTab] = useState('posts');
-  const [subView, setSubView] = useState('list'); // 'list', 'editor', 'overview'
-  const [editingPost, setEditingPost] = useState(null);
+  const { posts, updatePost } = useBlog();
+
+  const [activeTab, setActiveTab] = useState(() => parseAdminRoute(posts).activeTab);
+  const [subView, setSubView] = useState(() => parseAdminRoute(posts).subView); // 'list', 'editor', 'overview'
+  const [editingPost, setEditingPost] = useState(() => parseAdminRoute(posts).editingPost);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const { updatePost } = useBlog();
+
+  // Sync post when direct loading an edit route or when posts finish loading
+  useEffect(() => {
+    const route = parseAdminRoute(posts);
+    if (route.subView === 'editor' && route.slugOrId && !editingPost && posts.length > 0) {
+      const found = posts.find(
+        (p) => p.slug === route.slugOrId || p.id === route.slugOrId || p._id === route.slugOrId
+      );
+      if (found) {
+        setEditingPost(found);
+      }
+    }
+  }, [posts, editingPost]);
+
+  // Update document title dynamically
+  useEffect(() => {
+    if (subView === 'editor') {
+      if (editingPost?.title) {
+        document.title = `Chỉnh sửa: ${editingPost.title} | DUDI Admin`;
+      } else {
+        document.title = 'Soạn bài viết mới | DUDI Admin';
+      }
+    } else if (subView === 'overview') {
+      document.title = 'Tổng quan hệ thống | DUDI Admin';
+    } else {
+      document.title = 'Quản lý bài viết | DUDI Admin';
+    }
+  }, [subView, editingPost]);
+
+  // Programmatic sub-route navigation
+  const navigateToSubRoute = useCallback((targetSubView, post = null, pushState = true) => {
+    setSubView(targetSubView);
+
+    if (targetSubView === 'editor') {
+      setActiveTab('posts');
+      setEditingPost(post);
+      if (pushState) {
+        if (post) {
+          const targetSlug = post.slug || post.id;
+          const targetPath = `/admin/edit/${targetSlug}`;
+          if (window.location.pathname !== targetPath) {
+            window.history.pushState({ view: 'admin', sub: 'edit', id: targetSlug }, '', targetPath);
+          }
+        } else {
+          if (window.location.pathname !== '/admin/new') {
+            window.history.pushState({ view: 'admin', sub: 'new' }, '', '/admin/new');
+          }
+        }
+      }
+    } else if (targetSubView === 'overview') {
+      setActiveTab('dashboard');
+      setEditingPost(null);
+      if (pushState && window.location.pathname !== '/admin/overview') {
+        window.history.pushState({ view: 'admin', sub: 'overview' }, '', '/admin/overview');
+      }
+    } else {
+      // 'list'
+      setActiveTab('posts');
+      setEditingPost(null);
+      if (pushState && window.location.pathname !== '/admin/posts' && window.location.pathname !== '/admin') {
+        window.history.pushState({ view: 'admin', sub: 'posts' }, '', '/admin/posts');
+      }
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  // Listen to browser Back / Forward history navigation (popstate & hashchange)
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const route = parseAdminRoute(posts);
+      setSubView(route.subView);
+      setActiveTab(route.activeTab);
+      if (route.subView === 'editor') {
+        if (route.slugOrId) {
+          const found = posts.find(
+            (p) => p.slug === route.slugOrId || p.id === route.slugOrId || p._id === route.slugOrId
+          );
+          setEditingPost(found || null);
+        } else {
+          setEditingPost(null);
+        }
+      } else {
+        setEditingPost(null);
+      }
+    };
+
+    window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('hashchange', handleUrlChange);
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('hashchange', handleUrlChange);
+    };
+  }, [posts]);
 
   const handleEditPost = (post) => {
-    setEditingPost(post);
-    setSubView('editor');
+    navigateToSubRoute('editor', post);
   };
 
   const handleNewPost = () => {
-    setEditingPost(null);
-    setSubView('editor');
+    navigateToSubRoute('editor', null);
   };
 
   return (
@@ -34,9 +156,8 @@ export default function AdminDashboard({ onNavigate }) {
         isMobileOpen={isMobileSidebarOpen}
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
         onSelectTab={(tabId) => {
-          setActiveTab(tabId);
-          if (tabId === 'dashboard') setSubView('overview');
-          else if (tabId === 'posts') setSubView('list');
+          if (tabId === 'dashboard') navigateToSubRoute('overview');
+          else navigateToSubRoute('list');
           setIsMobileSidebarOpen(false);
         }} 
         onOpenHome={() => onNavigate && onNavigate('blog')}
@@ -47,9 +168,9 @@ export default function AdminDashboard({ onNavigate }) {
         {/* If in Editor Mode */}
         {subView === 'editor' ? (
           <AdminEditor 
-            key={editingPost ? editingPost.id : 'new-post'}
+            key={editingPost ? (editingPost.id || editingPost.slug) : 'new-post'}
             postToEdit={editingPost}
-            onExit={() => setSubView('list')}
+            onExit={() => navigateToSubRoute('list')}
             onNavigate={onNavigate}
           />
         ) : (
@@ -58,7 +179,7 @@ export default function AdminDashboard({ onNavigate }) {
             <AdminHeader 
               title="QUẢN LÝ BÀI VIẾT"
               onNewPostClick={handleNewPost}
-              onSearchClick={() => setSubView('list')}
+              onSearchClick={() => navigateToSubRoute('list')}
               onToggleSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
             />
             {/* Sub-view Switcher Bar */}
@@ -72,7 +193,7 @@ export default function AdminDashboard({ onNavigate }) {
                   <span>Soạn bài mới</span>
                 </button>
                 <button
-                  onClick={() => setSubView('list')}
+                  onClick={() => navigateToSubRoute('list')}
                   className={`px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-display font-semibold transition-all flex items-center gap-1.5 flex-shrink-0 ${
                     subView === 'list'
                       ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-md'
@@ -83,7 +204,7 @@ export default function AdminDashboard({ onNavigate }) {
                   <span>Danh sách bài viết</span>
                 </button>
                 <button
-                  onClick={() => setSubView('overview')}
+                  onClick={() => navigateToSubRoute('overview')}
                   className={`px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-display font-semibold transition-all flex items-center gap-1.5 flex-shrink-0 ${
                     subView === 'overview'
                       ? 'bg-gradient-to-r from-[#03b5d3] to-[#4cd7f6] text-[#003640] font-bold shadow-md'
@@ -125,7 +246,7 @@ export default function AdminDashboard({ onNavigate }) {
                   <TimelineUpdatesCard />
 
                   {/* BOTTOM-LEFT BOX: Popular Posts */}
-                  <PopularPostsCard onOpenAllPosts={() => setSubView('list')} />
+                  <PopularPostsCard onOpenAllPosts={() => navigateToSubRoute('list')} />
 
                   {/* BOTTOM-RIGHT BOX: At a Glance Overview */}
                   <AtAGlanceCard />
@@ -138,3 +259,4 @@ export default function AdminDashboard({ onNavigate }) {
     </div>
   );
 }
+
