@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useBlog } from '../context/BlogContext';
+import ConsultationModal from './ConsultationModal';
 
 const categoryColorMap = {
   'Công nghệ': 'bg-[#38bdf8]',
@@ -10,13 +11,17 @@ const categoryColorMap = {
 };
 
 export default function Sidebar() {
-  const { posts, activePostId, selectPost } = useBlog();
+  const { posts, publishedPosts, activePostId, selectPost } = useBlog();
+  const [isConsultationOpen, setIsConsultationOpen] = useState(false);
 
-  // Get related posts (exclude currently active post)
-  const relatedPosts = posts.filter((p) => p.id !== activePostId).slice(0, 4);
+  // Filter only published posts (exclude draft/hidden posts)
+  const visiblePosts = publishedPosts || posts.filter((p) => (p.status || 'published') === 'published');
 
-  // Group counts by category
-  const categoryCounts = posts.reduce((acc, p) => {
+  // Get related posts (exclude currently active post and hidden posts)
+  const relatedPosts = visiblePosts.filter((p) => p.id !== activePostId).slice(0, 4);
+
+  // Group counts by category for visible posts
+  const categoryCounts = visiblePosts.reduce((acc, p) => {
     const cat = p.category || 'Khác';
     acc[cat] = (acc[cat] || 0) + 1;
     return acc;
@@ -32,50 +37,56 @@ export default function Sidebar() {
     <aside className="lg:col-span-4 space-y-8 sticky top-24 self-start">
       
       {/* CARD 1: BÀI VIẾT LIÊN QUAN */}
-      <div className="bg-[#141024]/90 border border-purple-900/30 rounded-3xl p-6 shadow-xl backdrop-blur-sm">
+      <div className="bg-white dark:bg-[#141024]/90 border border-slate-200 dark:border-purple-900/30 rounded-3xl p-6 shadow-sm dark:shadow-xl backdrop-blur-sm transition-colors">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-base font-bold tracking-wider text-white uppercase flex items-center gap-2">
+          <h2 className="text-base font-bold tracking-wider text-slate-900 dark:text-white uppercase flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
             BÀI VIẾT LIÊN QUAN
           </h2>
-          <span className="text-xs font-mono text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20">
+          <span className="text-xs font-mono text-purple-600 dark:text-purple-300 bg-purple-50 dark:bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-200 dark:border-purple-500/20">
             {relatedPosts.length} bài
           </span>
         </div>
 
         <div className="space-y-4">
-          {relatedPosts.map((post) => (
-            <div 
-              key={post.id} 
-              onClick={() => {
-                selectPost(post.id);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-white/[0.04] transition-all group cursor-pointer border border-transparent hover:border-white/5" 
-            >
-              <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-800 border border-white/10 flex-shrink-0">
-                <img 
-                  src={post.coverImage || 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=200&q=80'} 
-                  alt={post.title} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                />
+          {relatedPosts.length === 0 ? (
+            <p className="text-xs text-slate-500 dark:text-slate-400 text-center py-4 italic">
+              Hiện chưa có bài viết liên quan khác.
+            </p>
+          ) : (
+            relatedPosts.map((post) => (
+              <div 
+                key={post.id} 
+                onClick={() => {
+                  selectPost(post.id);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="flex items-center gap-3.5 p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-all group cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-white/5" 
+              >
+                <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-white/10 flex-shrink-0 shadow-sm">
+                  <img 
+                    src={post.coverImage || 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=200&q=80'} 
+                    alt={post.title} 
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                </div>
+                <div className="flex flex-col justify-center min-w-0">
+                  <span className="text-[10px] font-mono text-rose-500 dark:text-rose-400 font-medium">
+                    {post.date}
+                  </span>
+                  <h3 className="text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-200 group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors line-clamp-2 leading-snug">
+                    {post.title}
+                  </h3>
+                </div>
               </div>
-              <div className="flex flex-col justify-center min-w-0">
-                <span className="text-[10px] font-mono text-rose-400 font-medium">
-                  {post.date}
-                </span>
-                <h3 className="text-xs sm:text-sm font-semibold text-slate-200 group-hover:text-rose-400 transition-colors line-clamp-2 leading-snug">
-                  {post.title}
-                </h3>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
 
       {/* CARD 2: CHUYÊN MỤC BÀI VIẾT */}
-      <div className="bg-[#141024]/90 border border-purple-900/30 rounded-3xl p-6 shadow-xl backdrop-blur-sm">
-        <h2 className="text-base font-bold tracking-wider text-white uppercase mb-6 flex items-center gap-2">
+      <div className="bg-white dark:bg-[#141024]/90 border border-slate-200 dark:border-purple-900/30 rounded-3xl p-6 shadow-sm dark:shadow-xl backdrop-blur-sm transition-colors">
+        <h2 className="text-base font-bold tracking-wider text-slate-900 dark:text-white uppercase mb-6 flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-[#38bdf8]" />
           CHUYÊN MỤC BÀI VIẾT
         </h2>
@@ -84,15 +95,15 @@ export default function Sidebar() {
           {categoriesList.map((cat, idx) => (
             <div 
               key={idx}
-              className="flex items-center justify-between p-2 rounded-xl hover:bg-white/[0.04] transition-all cursor-pointer group"
+              className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-all cursor-pointer group"
             >
               <div className="flex items-center gap-3">
                 <span className={`w-2.5 h-2.5 rounded-full ${cat.barColor} group-hover:scale-125 transition-transform`} />
-                <span className="text-xs sm:text-sm font-medium text-slate-300 group-hover:text-white transition-colors">
+                <span className="text-xs sm:text-sm font-medium text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white transition-colors">
                   {cat.name}
                 </span>
               </div>
-              <span className="text-xs font-mono font-bold text-slate-400 group-hover:text-[#4cd7f6] transition-colors bg-white/5 px-2 py-0.5 rounded-md">
+              <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-400 group-hover:text-sky-600 dark:group-hover:text-[#4cd7f6] transition-colors bg-slate-100 dark:bg-white/5 px-2 py-0.5 rounded-md">
                 {cat.count}
               </span>
             </div>
@@ -101,7 +112,7 @@ export default function Sidebar() {
       </div>
 
       {/* CARD 3: CTA TƯ VẤN DỰ ÁN */}
-      <div className="rounded-3xl p-6 bg-gradient-to-br from-[#1b1435] via-[#2a133d] to-[#3b1235] border border-rose-500/20 text-center relative overflow-hidden shadow-2xl">
+      <div className="rounded-3xl p-6 bg-gradient-to-br from-slate-900 via-[#1b1435] to-[#2a133d] dark:from-[#1b1435] dark:via-[#2a133d] dark:to-[#3b1235] border border-rose-500/20 text-center relative overflow-hidden shadow-xl">
         <div className="absolute -right-10 -bottom-10 w-36 h-36 bg-rose-500/20 rounded-full blur-3xl pointer-events-none" />
         <span className="material-symbols-outlined text-4xl text-rose-400 mb-3 block">
           rocket_launch
@@ -114,12 +125,18 @@ export default function Sidebar() {
         </p>
         <button 
           type="button"
-          onClick={() => alert('Liên hệ tư vấn kiến trúc DUDI Software: contact@dudi.vn')}
+          onClick={() => setIsConsultationOpen(true)}
           className="w-full py-2.5 rounded-xl font-bold text-xs tracking-wider uppercase text-white bg-gradient-to-r from-rose-500 to-red-600 shadow-lg shadow-rose-600/30 hover:brightness-110 active:scale-95 transition-all"
         >
           Nhận tư vấn ngay
         </button>
       </div>
+
+      {/* Consultation Popup Modal */}
+      <ConsultationModal 
+        isOpen={isConsultationOpen} 
+        onClose={() => setIsConsultationOpen(false)} 
+      />
 
     </aside>
   );

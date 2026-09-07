@@ -4,7 +4,7 @@ export default function Header({ isDarkMode, onToggleTheme, onNavigate, currentV
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   return (
-    <header className="w-full border-b border-purple-950/40 backdrop-blur-md bg-[#0c0915]/80 sticky top-0 z-50 transition-colors">
+    <header className="w-full border-b border-slate-200 dark:border-purple-950/40 backdrop-blur-md bg-white/85 dark:bg-[#0c0915]/80 sticky top-0 z-50 transition-colors">
       <div className="max-w-[1140px] mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between">
         
         {/* Brand Logo */}
@@ -20,25 +20,25 @@ export default function Header({ isDarkMode, onToggleTheme, onNavigate, currentV
             alt="DUDI Software Logo" 
             className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl object-contain shadow-lg shadow-rose-600/20 group-hover:scale-105 transition-transform duration-300"
           />
-          <span className="text-white font-bold text-lg sm:text-xl tracking-tight group-hover:text-rose-400 transition-colors">
+          <span className="text-slate-900 dark:text-white font-bold text-lg sm:text-xl tracking-tight group-hover:text-rose-600 dark:group-hover:text-rose-400 transition-colors">
             DUDI Software
           </span>
         </div>
 
         {/* Desktop Navigation Menu */}
-        <nav className="hidden md:flex items-center gap-8 text-[15px] font-medium text-slate-300">
-          <button onClick={() => onNavigate && onNavigate('blog')} className="hover:text-white transition-colors">Trang chủ</button>
-          <button onClick={() => onNavigate && onNavigate('blog')} className="hover:text-white transition-colors">Về chúng tôi</button>
-          <button onClick={() => onNavigate && onNavigate('blog')} className="hover:text-white transition-colors">Dịch vụ</button>
+        <nav className="hidden md:flex items-center gap-8 text-[15px] font-medium text-slate-600 dark:text-slate-300">
+          <button onClick={() => onNavigate && onNavigate('blog')} className="hover:text-slate-900 dark:hover:text-white transition-colors">Trang chủ</button>
+          <button onClick={() => onNavigate && onNavigate('blog')} className="hover:text-slate-900 dark:hover:text-white transition-colors">Về chúng tôi</button>
+          <button onClick={() => onNavigate && onNavigate('blog')} className="hover:text-slate-900 dark:hover:text-white transition-colors">Dịch vụ</button>
           <button 
             onClick={() => onNavigate && onNavigate('blog')}
-            className={`transition-colors ${currentView === 'blog' ? 'text-white font-semibold relative after:content-[\'\'] after:absolute after:-bottom-1.5 after:left-0 after:w-full after:h-0.5 after:bg-rose-500' : 'hover:text-white'}`}
+            className={`transition-colors ${currentView === 'blog' ? 'text-slate-900 dark:text-white font-semibold relative after:content-[\'\'] after:absolute after:-bottom-1.5 after:left-0 after:w-full after:h-0.5 after:bg-rose-500' : 'hover:text-slate-900 dark:hover:text-white'}`}
           >
             Blog
           </button>
           <button 
             onClick={() => onNavigate && onNavigate('admin')}
-            className="hover:text-[#4cd7f6] transition-colors flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-[#1e1a26] border border-[#4cd7f6]/30 text-[#4cd7f6]"
+            className="hover:text-[#0284c7] dark:hover:text-[#4cd7f6] transition-colors flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-[#1e1a26] border border-sky-300 dark:border-[#4cd7f6]/30 text-sky-600 dark:text-[#4cd7f6] font-medium"
           >
             <span className="material-symbols-outlined text-[14px]">admin_panel_settings</span>
             <span>Admin</span>
@@ -51,22 +51,23 @@ export default function Header({ isDarkMode, onToggleTheme, onNavigate, currentV
           <button 
             aria-label="Đổi theme sáng tối" 
             onClick={onToggleTheme}
-            className="p-2 sm:p-2.5 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 transition-colors" 
+            className="p-2 sm:p-2.5 rounded-full bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-300 dark:border-white/10 transition-colors shadow-sm" 
             type="button"
+            title={isDarkMode ? 'Chuyển sang giao diện Sáng' : 'Chuyển sang giao diện Tối'}
           >
             {isDarkMode ? (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
               </svg>
             ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-4 h-4 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
               </svg>
             )}
           </button>
 
           {/* Language Switcher */}
-          <button className="hidden sm:block px-3.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-semibold text-slate-200 border border-white/10 transition-colors tracking-wide" type="button">
+          <button className="hidden sm:block px-3.5 py-1.5 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-xs font-semibold text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 transition-colors tracking-wide" type="button">
             EN
           </button>
 
@@ -78,7 +79,7 @@ export default function Header({ isDarkMode, onToggleTheme, onNavigate, currentV
           {/* Mobile Menu Hamburger Button */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-2 rounded-xl bg-white/5 text-slate-300 hover:text-white border border-white/10 transition-colors"
+            className="md:hidden p-2 rounded-xl bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-white/10 transition-colors"
             aria-label="Menu"
             type="button"
           >
@@ -91,35 +92,35 @@ export default function Header({ isDarkMode, onToggleTheme, onNavigate, currentV
 
       {/* Mobile Dropdown Menu Panel */}
       {isMobileMenuOpen && (
-        <div className="md:hidden border-t border-purple-950/40 bg-[#120d20] px-4 py-4 flex flex-col gap-2 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="md:hidden border-t border-slate-200 dark:border-purple-950/40 bg-white dark:bg-[#120d20] px-4 py-4 flex flex-col gap-2 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200">
           <button 
             onClick={() => { onNavigate && onNavigate('blog'); setIsMobileMenuOpen(false); }} 
-            className="px-3 py-2 text-left text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+            className="px-3 py-2 text-left text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
           >
             Trang chủ
           </button>
           <button 
             onClick={() => { onNavigate && onNavigate('blog'); setIsMobileMenuOpen(false); }} 
-            className="px-3 py-2 text-left text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+            className="px-3 py-2 text-left text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
           >
             Về chúng tôi
           </button>
           <button 
             onClick={() => { onNavigate && onNavigate('blog'); setIsMobileMenuOpen(false); }} 
-            className="px-3 py-2 text-left text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+            className="px-3 py-2 text-left text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors"
           >
             Dịch vụ
           </button>
           <button 
             onClick={() => { onNavigate && onNavigate('blog'); setIsMobileMenuOpen(false); }} 
-            className="px-3 py-2 text-left text-sm font-medium text-rose-400 font-semibold bg-rose-500/10 rounded-lg transition-colors flex items-center justify-between"
+            className="px-3 py-2 text-left text-sm font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 rounded-lg transition-colors flex items-center justify-between"
           >
             <span>Blog chi tiết</span>
             <span className="material-symbols-outlined text-[16px]">article</span>
           </button>
           <button 
             onClick={() => { onNavigate && onNavigate('admin'); setIsMobileMenuOpen(false); }} 
-            className="px-3 py-2 text-left text-sm font-semibold text-[#4cd7f6] bg-[#4cd7f6]/10 rounded-lg transition-colors flex items-center justify-between"
+            className="px-3 py-2 text-left text-sm font-semibold text-sky-600 dark:text-[#4cd7f6] bg-sky-50 dark:bg-[#4cd7f6]/10 rounded-lg transition-colors flex items-center justify-between"
           >
             <span>Trang quản trị (Admin)</span>
             <span className="material-symbols-outlined text-[16px]">dashboard</span>

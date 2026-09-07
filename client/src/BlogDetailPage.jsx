@@ -1,30 +1,19 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Header from './components/Header';
 import Breadcrumbs from './components/Breadcrumbs';
 import ArticleHeader from './components/ArticleHeader';
 import ArticleBody from './components/ArticleBody';
 import Sidebar from './components/Sidebar';
 import Footer from './components/Footer';
+import { useTheme } from './context/ThemeContext';
 
 export default function BlogDetailPage({ onNavigate }) {
-  const [isDarkMode, setIsDarkMode] = useState(true);
-
-  const handleToggleTheme = () => {
-    setIsDarkMode((prev) => {
-      const next = !prev;
-      if (next) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-      return next;
-    });
-  };
+  const { isDarkMode, toggleTheme } = useTheme();
 
   return (
-    <div className="min-h-screen flex flex-col font-sans selection:bg-rose-500 selection:text-white">
+    <div className="min-h-screen flex flex-col font-sans selection:bg-rose-500 selection:text-white bg-[#f8fafc] dark:bg-[#100c18] text-slate-900 dark:text-[#e8dff1] transition-colors duration-300">
       {/* Header */}
-      <Header isDarkMode={isDarkMode} onToggleTheme={handleToggleTheme} onNavigate={onNavigate} />
+      <Header isDarkMode={isDarkMode} onToggleTheme={toggleTheme} onNavigate={onNavigate} />
 
       {/* SubNavigation & Breadcrumbs */}
       <Breadcrumbs onNavigate={onNavigate} />

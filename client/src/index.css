@@ -6,14 +6,32 @@
   html, body {
     margin: 0;
     padding: 0;
+    transition: background-color 0.25s ease, color 0.25s ease;
   }
-  body {
+  
+  html.dark body {
     overscroll-behavior: none;
     background-color: #100c18;
     color: #e8dff1;
     font-family: 'Inter', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  html.light body {
+    overscroll-behavior: none;
+    background-color: #f8fafc;
+    color: #1e293b;
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    overscroll-behavior: none;
+    background-color: #100c18;
+    color: #e8dff1;
+    font-family: 'Inter', sans-serif;
   }
 }
 
@@ -30,13 +48,37 @@
   width: 6px;
   height: 6px;
 }
-::-webkit-scrollbar-track {
+html.dark ::-webkit-scrollbar-track {
   background: #100c18;
 }
-::-webkit-scrollbar-thumb {
+html.dark ::-webkit-scrollbar-thumb {
   background: #2c2835;
+  border-radius: 3px;
+}
+html.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+html.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #ff5167;
+}
+
+/* Rich Text WYSIWYG ContentEditable Styles */
+[contenteditable][data-placeholder]:empty:before {
+  content: attr(data-placeholder);
+  color: #9e8eb3;
+  opacity: 0.6;
+  pointer-events: none;
+  display: inline-block;
+}
+
+html.light [contenteditable][data-placeholder]:empty:before {
+  color: #94a3b8;
+}
+
+[contenteditable] {
+  outline: none;
 }
