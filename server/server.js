@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { connectDB } from './config/db.js';
 import postRoutes from './routes/postRoutes.js';
+import uploadRoutes from './routes/uploadRoutes.js';
 
 // Load environment variables
 dotenv.config();
@@ -12,16 +13,39 @@ const PORT = process.env.PORT || 5000;
 
 // Middlewares
 app.use(cors());
-app.use(express.json({ limit: '20mb' }));
-app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // Health Check API
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', service: 'DUDI Blog MongoDB Backend', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    service: 'DUDI Blog MongoDB Backend', 
+    cloudinary: Boolean(process.env.CLOUDINARY_CLOUD_NAME),
+    timestamp: new Date().toISOString() 
+  });
 });
 
-// Post Routes
+// Routes
 app.use('/api/posts', postRoutes);
+app.use('/api/upload', uploadRoutes);
+
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve static frontend in production
+if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
+  const distPath = path.join(__dirname, '../dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api')) {
+      res.sendFile(path.join(distPath, 'index.html'));
+    }
+  });
+}
 
 // Error handling middleware
 app.use((err, req, res, next) => {

@@ -468,20 +468,48 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     fileInputRef.current?.click();
   };
 
-  const handleFileUpload = (e, isCover = false) => {
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+
+  const handleFileUpload = async (e, isCover = false) => {
     const file = e.target.files?.[0];
     if (file) {
+      setIsUploadingImage(true);
       const reader = new FileReader();
-      reader.onload = (event) => {
-        const resultUrl = event.target.result;
+      reader.onload = async (event) => {
+        const rawBase64 = event.target.result;
+        let finalImageUrl = rawBase64;
+
+        try {
+          // Upload directly to Cloudinary
+          const res = await fetch('/api/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              image: rawBase64,
+              folder: isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks' 
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.url) {
+              finalImageUrl = data.url;
+              console.log('[Cloudinary] Tải ảnh lên thành công:', finalImageUrl);
+            }
+          }
+        } catch (uploadErr) {
+          console.warn('[Cloudinary] Không thể tải lên Cloudinary, dùng base64 tạm:', uploadErr);
+        } finally {
+          setIsUploadingImage(false);
+        }
+
         if (isCover) {
-          setCoverImage(resultUrl);
+          setCoverImage(finalImageUrl);
         } else {
           const insertIdx = targetBlockIndex !== null ? targetBlockIndex : getActiveIndex();
           const imageBlock = {
             id: `img-${Date.now()}`,
             type: 'image',
-            url: resultUrl,
+            url: finalImageUrl,
             caption: file.name ? `Hình: ${file.name.replace(/\.[^/.]+$/, '')} (.webp)` : 'Hình ảnh minh họa (.webp)'
           };
           const nextParagraph = {
@@ -496,7 +524,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
             pushHistory(next);
             return next;
           });
-          if (!coverImage) setCoverImage(resultUrl);
+          if (!coverImage) setCoverImage(finalImageUrl);
         }
       };
       reader.readAsDataURL(file);

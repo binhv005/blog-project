@@ -54,7 +54,7 @@ const PostSchema = new mongoose.Schema({
 });
 
 // Auto set custom id if not provided before saving
-PostSchema.pre('save', function(next) {
+PostSchema.pre('save', function() {
   if (!this.id) {
     this.id = `post-${Date.now()}`;
   }
@@ -66,7 +66,6 @@ PostSchema.pre('save', function(next) {
       .replace(/[^\w\s-]/g, '')
       .replace(/\s+/g, '-');
   }
-  next();
 });
 
 const Post = mongoose.model('Post', PostSchema);

@@ -194,7 +194,7 @@ export const updatePost = async (req, res) => {
     const updated = await Post.findOneAndUpdate(
       { $or: [{ id: id }, { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }] },
       { $set: updateData },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
 
     if (!updated) {

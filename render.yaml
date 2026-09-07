@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: dudi-blog
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        value: ai1z2oaj
+      - key: CLOUDINARY_API_KEY
+        value: 172892198212144
+      - key: CLOUDINARY_API_SECRET
+        sync: false

@@ -22,6 +22,26 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
 
   const categories = ['Tất cả', 'Công nghệ', 'AI & Big Data', 'Bảo mật', 'Thiết kế', 'Chính sách & Số hóa'];
 
+  const [isSyncingCloudinary, setIsSyncingCloudinary] = useState(false);
+
+  const handleSyncCloudinary = async () => {
+    setIsSyncingCloudinary(true);
+    try {
+      const res = await fetch('/api/upload/sync-all', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message || 'Đã đồng bộ toàn bộ ảnh lên Cloudinary thành công!');
+        window.location.reload();
+      } else {
+        alert('Lỗi đồng bộ: ' + data.message);
+      }
+    } catch (err) {
+      alert('Không thể kết nối API Cloudinary: ' + err.message);
+    } finally {
+      setIsSyncingCloudinary(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6 w-full">
       {/* Top Filter & Actions Bar */}
@@ -40,7 +60,7 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
           />
         </div>
 
-        {/* Categories and Status Filter */}
+        {/* Categories, Status Filter and Cloudinary Sync */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <select
             value={filterCategory}
@@ -86,6 +106,19 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
               Bản nháp ({posts.filter((p) => p.status === 'draft').length})
             </button>
           </div>
+
+          {/* Cloudinary Sync Button */}
+          <button
+            onClick={handleSyncCloudinary}
+            disabled={isSyncingCloudinary}
+            className="px-3 py-2 rounded-xl text-xs font-semibold text-[#4cd7f6] bg-[#4cd7f6]/10 border border-[#4cd7f6]/30 hover:bg-[#4cd7f6]/20 transition-all flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+            title="Đồng bộ tất cả ảnh bài viết trong MongoDB lên Cloudinary CDN"
+          >
+            <span className={`material-symbols-outlined text-[16px] ${isSyncingCloudinary ? 'animate-spin' : ''}`}>
+              {isSyncingCloudinary ? 'sync' : 'cloud_upload'}
+            </span>
+            <span>{isSyncingCloudinary ? 'Đang đồng bộ...' : 'Đồng bộ Cloudinary'}</span>
+          </button>
 
           <button
             onClick={resetToDefaults}
