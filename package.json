@@ -4,13 +4,13 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite client",
     "start": "node server/server.js",
     "server": "node server/server.js",
     "dev:all": "concurrently \"npm run server\" \"npm run dev\"",
-    "build": "vite build",
-    "vercel-build": "vite build",
-    "preview": "vite preview"
+    "build": "vite build client",
+    "vercel-build": "vite build client",
+    "preview": "vite preview client"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.1",
