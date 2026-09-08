@@ -2616,21 +2616,21 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                 <span className="material-symbols-outlined text-emerald-500 dark:text-emerald-400 text-[20px]">travel_explore</span>
                 <h3 className="font-display font-bold text-sm text-slate-900 dark:text-[#e8dff1]">Tối ưu SEO Google</h3>
               </div>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-mono font-bold">
+              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-display font-semibold">
                 {title.trim() ? 'Điểm 94/100' : 'Chưa nhập'}
               </span>
             </div>
 
             <div className="flex flex-col gap-1 mb-3">
               <label className="text-xs font-semibold text-slate-600 dark:text-[#ad8888]">Đường dẫn tĩnh (Slug URL)</label>
-              <div className="flex items-center px-3 py-2 rounded-xl bg-slate-50 dark:bg-[#15111d] text-slate-900 dark:text-[#e8dff1] text-xs font-mono border border-slate-200 dark:border-[#2c2835] overflow-x-auto">
-                <span className="text-slate-400 dark:text-[#ad8888] select-none">/blog/</span>
+              <div className="flex items-center px-3 py-2 rounded-xl bg-slate-50 dark:bg-[#15111d] text-slate-900 dark:text-[#e8dff1] text-xs border border-slate-200 dark:border-[#2c2835] overflow-x-auto">
+                <span className="text-slate-400 dark:text-[#ad8888] select-none font-medium">/blog/</span>
                 <input
                   type="text"
                   value={slug}
                   onChange={(e) => setSlug(e.target.value)}
                   placeholder="duong-dan-tinh"
-                  className="bg-transparent text-sky-600 dark:text-[#4cd7f6] outline-none flex-1 font-mono text-xs placeholder-slate-400 dark:placeholder-slate-500"
+                  className="bg-transparent text-sky-600 dark:text-[#4cd7f6] outline-none flex-1 font-medium text-xs placeholder-slate-400 dark:placeholder-slate-500 ml-0.5"
                 />
               </div>
             </div>
@@ -2638,14 +2638,14 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
             <div className="flex flex-col gap-1 mb-3">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-semibold text-slate-600 dark:text-[#ad8888]">Thẻ mô tả Meta Description</label>
-                <span className="font-mono text-[10px] text-slate-500 dark:text-[#ad8888]">{metaDesc.length}/160 ký tự</span>
+                <span className="text-[11px] font-display text-slate-500 dark:text-[#ad8888]">{metaDesc.length}/160 ký tự</span>
               </div>
               <textarea
                 value={metaDesc}
                 onChange={(e) => setMetaDesc(e.target.value)}
                 placeholder="Mô tả tóm tắt cho công cụ tìm kiếm Google..."
                 rows="3"
-                className="p-3 rounded-xl bg-slate-50 dark:bg-[#15111d] text-slate-900 dark:text-[#e8dff1] text-xs resize-none outline-none leading-relaxed border border-slate-200 dark:border-[#2c2835] placeholder-slate-400 dark:placeholder-slate-500"
+                className="p-3 rounded-xl bg-slate-50 dark:bg-[#15111d] text-slate-900 dark:text-[#e8dff1] text-xs resize-none outline-none leading-relaxed border border-slate-200 dark:border-[#2c2835] placeholder-slate-400 dark:placeholder-slate-500 font-normal"
               />
             </div>
           </div>
@@ -2660,30 +2660,30 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
             <div className="grid grid-cols-2 gap-2">
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#15111d] flex flex-col border border-slate-200 dark:border-[#2c2835]">
                 <span className="text-[11px] text-slate-500 dark:text-[#ad8888]">Số lượng từ</span>
-                <span className="font-mono font-bold text-xl text-slate-900 dark:text-[#e8dff1] mt-0.5">{wordCount}</span>
-                <span className="font-mono text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
+                <span className="font-display font-bold text-xl text-slate-900 dark:text-[#e8dff1] mt-0.5">{wordCount}</span>
+                <span className="text-[11px] font-display text-emerald-600 dark:text-emerald-400 mt-0.5">
                   {wordCount > 300 ? 'Đạt chuẩn chuyên sâu' : 'Đang soạn thảo'}
                 </span>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#15111d] flex flex-col border border-slate-200 dark:border-[#2c2835]">
                 <span className="text-[11px] text-slate-500 dark:text-[#ad8888]">Thời gian đọc</span>
-                <span className="font-mono font-bold text-xl text-sky-600 dark:text-[#4cd7f6] mt-0.5">
+                <span className="font-display font-bold text-xl text-sky-600 dark:text-[#4cd7f6] mt-0.5">
                   ~{readTimeMinutes}<span className="text-xs font-sans ml-1">phút</span>
                 </span>
-                <span className="font-mono text-[10px] text-slate-500 dark:text-[#ad8888] mt-0.5">Tương tác trực quan</span>
+                <span className="text-[11px] font-display text-slate-500 dark:text-[#ad8888] mt-0.5">Tương tác trực quan</span>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#15111d] flex flex-col border border-slate-200 dark:border-[#2c2835]">
                 <span className="text-[11px] text-slate-500 dark:text-[#ad8888]">Cấu trúc đề mục</span>
-                <span className="font-mono font-bold text-sm text-slate-900 dark:text-[#e8dff1] mt-0.5">{headingsCount} Mục H2</span>
-                <span className="font-mono text-[10px] text-rose-600 dark:text-[#ffb3b5] mt-0.5">Mạch lạc</span>
+                <span className="font-display font-bold text-sm text-slate-900 dark:text-[#e8dff1] mt-0.5">{headingsCount} Mục H2</span>
+                <span className="text-[11px] font-display text-rose-600 dark:text-[#ffb3b5] mt-0.5">Mạch lạc</span>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#15111d] flex flex-col border border-slate-200 dark:border-[#2c2835]">
                 <span className="text-[11px] text-slate-500 dark:text-[#ad8888]">Tài nguyên ảnh (.webp)</span>
-                <span className="font-mono font-bold text-sm text-slate-900 dark:text-[#e8dff1] mt-0.5">{imageBlocksCount} Khối</span>
-                <span className="font-mono text-[10px] text-sky-600 dark:text-[#4cd7f6] mt-0.5">WebP Tối ưu</span>
+                <span className="font-display font-bold text-sm text-slate-900 dark:text-[#e8dff1] mt-0.5">{imageBlocksCount} Khối</span>
+                <span className="text-[11px] font-display text-sky-600 dark:text-[#4cd7f6] mt-0.5">WebP Tối ưu</span>
               </div>
             </div>
           </div>
