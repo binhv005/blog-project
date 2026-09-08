@@ -20,9 +20,9 @@ function formatRichText(raw) {
     .replace(/!\[(.*?)\]\((.*?)\)/g, (_, caption, url) => {
       const cleanCaption = caption ? caption.trim() : '';
       const optimizedUrl = optimizeImageUrl(url, { width: 1000, quality: 80 });
-      return `<figure class="my-6 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl">
-        <img src="${optimizedUrl}" alt="${cleanCaption || 'Hình ảnh bài viết WebP'}" loading="lazy" decoding="async" class="w-full max-h-[480px] object-cover rounded-t-2xl transition-transform duration-500 hover:scale-[1.01]" />
-        ${cleanCaption ? `<figcaption class="text-xs text-slate-600 dark:text-slate-400 italic text-center py-2.5 px-4 bg-slate-50 dark:bg-[#100c18] border-t border-slate-200 dark:border-white/5">${cleanCaption}</figcaption>` : ''}
+      return `<figure class="my-6 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl max-w-3xl mx-auto flex flex-col items-center">
+        <img src="${optimizedUrl}" alt="${cleanCaption || 'Hình ảnh bài viết WebP'}" loading="lazy" decoding="async" class="w-full max-h-[480px] object-cover rounded-t-2xl transition-transform duration-500 hover:scale-[1.01] block mx-auto" />
+        ${cleanCaption ? `<figcaption class="w-full text-xs text-slate-600 dark:text-slate-400 italic text-center py-2.5 px-4 bg-slate-50 dark:bg-[#100c18] border-t border-slate-200 dark:border-white/5">${cleanCaption}</figcaption>` : ''}
       </figure>`;
     })
     .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
@@ -51,7 +51,7 @@ export default function ArticleBody() {
                   key={block.id || idx}
                   className={`text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center gap-3 border-b border-slate-200 dark:border-white/10 pb-3 mt-8 ${block.align === 'center' ? 'justify-center text-center' : block.align === 'right' ? 'justify-end text-right' : 'text-left'
                     }`}
-                  style={{ color: block.color || undefined }}
+                  style={{ color: block.color || undefined, lineHeight: block.lineHeight || undefined }}
                 >
                   <span className="text-rose-500 font-mono text-xl">
                     {String(idx + 1).padStart(2, '0')}.
@@ -69,7 +69,7 @@ export default function ArticleBody() {
                       key={pIdx}
                       className={`leading-relaxed ${block.align === 'center' ? 'text-center' : block.align === 'right' ? 'text-right' : 'text-left'
                         }`}
-                      style={{ color: block.color || undefined }}
+                      style={{ color: block.color || undefined, lineHeight: block.lineHeight || undefined }}
                       dangerouslySetInnerHTML={{ __html: formatRichText(para) }}
                     />
                   ))}
@@ -79,16 +79,16 @@ export default function ArticleBody() {
 
             if (block.type === 'image' && block.url) {
               return (
-                <figure key={block.id || idx} className="my-8 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl">
+                <figure key={block.id || idx} className="my-8 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl max-w-3xl mx-auto flex flex-col items-center">
                   <OptimizedImage
                     src={block.url}
                     alt={block.caption || 'Hình minh họa WebP'}
                     sizes="(max-width: 768px) 100vw, 1000px"
                     containerClassName="w-full max-h-[480px]"
-                    className="w-full max-h-[480px] object-cover"
+                    className="w-full max-h-[480px] object-cover block mx-auto"
                   />
                   {block.caption && (
-                    <figcaption className="text-xs text-slate-600 dark:text-slate-400 italic text-center py-2.5 px-4 bg-slate-50 dark:bg-[#100c18] border-t border-slate-200 dark:border-white/5">
+                    <figcaption className="w-full text-xs text-slate-600 dark:text-slate-400 italic text-center py-2.5 px-4 bg-slate-50 dark:bg-[#100c18] border-t border-slate-200 dark:border-white/5">
                       {block.caption}
                     </figcaption>
                   )}
@@ -160,21 +160,32 @@ export default function ArticleBody() {
             }
 
             if (block.type === 'video' && block.url) {
-              const embedUrl = formatVideoEmbedUrl(block.url);
+              const isDirectVideo = block.url.startsWith('data:') || block.url.startsWith('blob:') || block.url.includes('/video/upload/') || block.url.includes('.mp4') || block.url.includes('.webm') || block.url.includes('.mov');
+              const embedUrl = isDirectVideo ? '' : formatVideoEmbedUrl(block.url);
               return (
-                <figure key={block.id || idx} className="my-8 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl">
-                  <div className="relative aspect-video w-full bg-black">
-                    <iframe
-                      src={embedUrl}
-                      title={block.caption || 'Video'}
-                      loading="lazy"
-                      className="w-full h-full border-0"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                      allowFullScreen
-                    />
+                <figure key={block.id || idx} className="my-8 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl max-w-3xl mx-auto flex flex-col items-center">
+                  <div className="relative aspect-video w-full bg-black flex items-center justify-center">
+                    {isDirectVideo ? (
+                      <video
+                        src={block.url}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <iframe
+                        src={embedUrl}
+                        title={block.caption || 'Video'}
+                        loading="lazy"
+                        className="w-full h-full border-0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                      />
+                    )}
                   </div>
                   {block.caption && (
-                    <figcaption className="text-xs text-slate-600 dark:text-slate-400 italic text-center py-2.5 px-4 bg-slate-50 dark:bg-[#100c18] border-t border-slate-200 dark:border-white/5">
+                    <figcaption className="w-full text-xs text-slate-600 dark:text-slate-400 italic text-center py-2.5 px-4 bg-slate-50 dark:bg-[#100c18] border-t border-slate-200 dark:border-white/5">
                       {block.caption}
                     </figcaption>
                   )}

@@ -35,9 +35,18 @@ export default function ArticleHeader() {
       </div>
 
       {/* Main Title */}
-      <h1 className="text-3xl sm:text-4xl lg:text-[42px] font-extrabold text-slate-900 dark:text-white tracking-tight leading-[1.2] mb-6">
+      <h1 className="text-3xl sm:text-4xl lg:text-[42px] font-extrabold text-slate-900 dark:text-white tracking-tight leading-[1.2] mb-5">
         {activePost.title}
       </h1>
+
+      {/* Sapo / Lead Paragraph */}
+      {(activePost.sapo || activePost.summary) && (
+        <div className="relative border-l-4 border-[#ff5167] pl-4 sm:pl-5 py-2 my-5 bg-slate-50/80 dark:bg-[#1f182c]/60 rounded-r-2xl border-y border-r border-slate-200/60 dark:border-purple-900/20 shadow-sm">
+          <p className="text-base sm:text-lg lg:text-xl font-medium text-slate-500 dark:text-[#a898be] italic leading-relaxed">
+            {activePost.sapo || activePost.summary}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

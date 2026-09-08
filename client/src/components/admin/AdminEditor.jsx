@@ -3,6 +3,8 @@ import { useBlog } from '../../context/BlogContext';
 import { useToast } from '../../context/ToastContext';
 import { compressImageFile, optimizeImageUrl, formatVideoEmbedUrl } from '../../utils/mediaOptimizer';
 import OptimizedImage from '../common/OptimizedImage';
+import PromptModal from '../common/PromptModal';
+import ImageUploadModal from '../common/ImageUploadModal';
 
 // Helper to convert legacy Markdown to HTML for initial block load
 function mdToHtml(str) {
@@ -102,6 +104,16 @@ function cleanPastedHtml(html) {
         }
       }
 
+      // 5. Ensure all images and figures are automatically centered
+      if (el.tagName.toLowerCase() === 'img') {
+        el.className = 'my-3 max-h-[420px] max-w-full rounded-xl object-cover block mx-auto shadow-lg text-center';
+        el.removeAttribute('align');
+      }
+      if (el.tagName.toLowerCase() === 'figure') {
+        el.className = 'my-4 text-center block mx-auto';
+        el.removeAttribute('align');
+      }
+
       // Remove style attribute if empty
       if (!el.getAttribute('style') || el.getAttribute('style').trim() === '') {
         el.removeAttribute('style');
@@ -125,7 +137,8 @@ function RichEditableBlock({
   className = '',
   style = {},
   inputRef,
-  onKeyDown
+  onKeyDown,
+  blockId
 }) {
   const innerRef = useRef(null);
   const isComposingRef = useRef(false);
@@ -185,6 +198,7 @@ function RichEditableBlock({
       ref={innerRef}
       contentEditable
       suppressContentEditableWarning
+      data-block-id={blockId}
       onInput={handleInput}
       onCompositionStart={() => { isComposingRef.current = true; }}
       onCompositionEnd={(e) => {
@@ -224,10 +238,131 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   const { createPost, updatePost, selectPost, setTemporaryPreviewPost, posts } = useBlog();
   const { toast } = useToast();
   const fileInputRef = useRef(null);
+  const videoFileInputRef = useRef(null);
   const coverFileInputRef = useRef(null);
   const titleTextareaRef = useRef(null);
   const newCategoryInputRef = useRef(null);
   const [targetBlockIndex, setTargetBlockIndex] = useState(null);
+
+  // Synchronous cursor tracking refs to guarantee inserting at the exact active block / cursor location
+  const targetBlockIndexRef = useRef(null);
+  const lastActiveIndexRef = useRef(0);
+  const splitContextRef = useRef(null);
+
+  // Selection ref for restoring caret when closing/submitting modals
+  const savedSelectionRef = useRef(null);
+
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      savedSelectionRef.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
+
+  const restoreSelection = () => {
+    if (savedSelectionRef.current) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedSelectionRef.current);
+    }
+  };
+
+  // Helper to reliably detect cursor position & split point inside active block
+  const captureCursorContext = () => {
+    const selection = window.getSelection();
+    let blockId = focusedBlockId;
+    let splitData = null;
+
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      let container = range.commonAncestorContainer;
+      if (container && container.nodeType === Node.TEXT_NODE) {
+        container = container.parentElement;
+      }
+      const blockEl = container?.closest?.('[data-block-id]');
+      if (blockEl) {
+        const foundId = blockEl.getAttribute('data-block-id');
+        if (foundId) blockId = foundId;
+        try {
+          const rangeBefore = range.cloneRange();
+          rangeBefore.selectNodeContents(blockEl);
+          rangeBefore.setEnd(range.startContainer, range.startOffset);
+          const beforeContents = rangeBefore.cloneContents();
+          const divBefore = document.createElement('div');
+          divBefore.appendChild(beforeContents);
+
+          const rangeAfter = range.cloneRange();
+          rangeAfter.selectNodeContents(blockEl);
+          rangeAfter.setStart(range.endContainer, range.endOffset);
+          const afterContents = rangeAfter.cloneContents();
+          const divAfter = document.createElement('div');
+          divAfter.appendChild(afterContents);
+
+          splitData = {
+            beforeText: divBefore.innerHTML,
+            afterText: divAfter.innerHTML
+          };
+        } catch (_) { }
+      }
+    }
+
+    let idx = -1;
+    if (blockId) {
+      idx = blocks.findIndex((b) => b.id === blockId);
+    }
+    if (idx === -1) {
+      idx = (lastActiveIndexRef.current >= 0 && lastActiveIndexRef.current < blocks.length)
+        ? lastActiveIndexRef.current
+        : 0;
+    }
+    return { blockId, blockIdx: idx, splitData };
+  };
+
+  // Custom Prompt Modal State
+  const [promptModal, setPromptModal] = useState({
+    isOpen: false,
+    title: '',
+    description: '',
+    placeholder: '',
+    defaultValue: '',
+    confirmText: 'Xác nhận',
+    icon: 'link',
+    iconColor: 'sky',
+    onConfirm: () => { }
+  });
+
+  const openPrompt = ({
+    title,
+    description,
+    placeholder = 'https://...',
+    defaultValue = '',
+    confirmText = 'Xác nhận',
+    icon = 'link',
+    iconColor = 'sky',
+    onConfirm
+  }) => {
+    setPromptModal({
+      isOpen: true,
+      title,
+      description,
+      placeholder,
+      defaultValue,
+      confirmText,
+      icon,
+      iconColor,
+      onConfirm: (val) => {
+        setPromptModal((prev) => ({ ...prev, isOpen: false }));
+        onConfirm(val);
+      }
+    });
+  };
+
+  const closePrompt = () => {
+    setPromptModal((prev) => ({ ...prev, isOpen: false }));
+  };
+
+  // Cover Image Upload State for Inline Black Card Loader
+  const [coverUploadState, setCoverUploadState] = useState(null);
 
   // Publish Success Modal State
   const [showPublishSuccessModal, setShowPublishSuccessModal] = useState(false);
@@ -292,7 +427,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       setCustomCategories(updated);
       try {
         localStorage.setItem('dudi_custom_categories', JSON.stringify(updated));
-      } catch (_) {}
+      } catch (_) { }
     }
     setCategory(trimmed);
     setNewCategoryName('');
@@ -346,9 +481,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     new Date(Date.now() + 3600 * 1000 * 24).toISOString().slice(0, 16)
   );
   const [isDrawerOpen, setIsDrawerOpen] = useState(true);
-  const [lastSavedTime, setLastSavedTime] = useState(
-    new Date().toTimeString().split(' ')[0]
-  );
   const [selectedFormat, setSelectedFormat] = useState('H2');
 
   // History State for Undo / Redo
@@ -376,6 +508,31 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   const [isCodeActive, setIsCodeActive] = useState(false);
   const [isLinkActive, setIsLinkActive] = useState(false);
 
+  // Custom Toolbar Dropdowns State (prevents losing text selection on click)
+  const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false);
+  const [isFontSizeDropdownOpen, setIsFontSizeDropdownOpen] = useState(false);
+  const [selectedLineHeight, setSelectedLineHeight] = useState('1.6');
+  const [isLineHeightDropdownOpen, setIsLineHeightDropdownOpen] = useState(false);
+  const formatDropdownRef = useRef(null);
+  const fontSizeDropdownRef = useRef(null);
+  const lineHeightDropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (formatDropdownRef.current && !formatDropdownRef.current.contains(e.target)) {
+        setIsFormatDropdownOpen(false);
+      }
+      if (fontSizeDropdownRef.current && !fontSizeDropdownRef.current.contains(e.target)) {
+        setIsFontSizeDropdownOpen(false);
+      }
+      if (lineHeightDropdownRef.current && !lineHeightDropdownRef.current.contains(e.target)) {
+        setIsLineHeightDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Auto-generate slug when title changes if creating new
   useEffect(() => {
     if (!postToEdit && title.trim()) {
@@ -391,15 +548,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       }
     }
   }, [title, postToEdit, summary, metaDesc]);
-
-  // Handle autosave timer simulation
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = new Date();
-      setLastSavedTime(now.toTimeString().split(' ')[0]);
-    }, 45000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Compute live word count & reading time
   const fullText = `${title} ${summary} ${blocks.map((b) => b.text || '').join(' ')}`.replace(/<[^>]+>/g, '').trim();
@@ -429,6 +577,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       let isLink = false;
 
       if (selection && selection.rangeCount > 0) {
+        if (!selection.isCollapsed) {
+          savedSelectionRef.current = selection.getRangeAt(0).cloneRange();
+        }
         let node = selection.anchorNode;
         if (node && node.nodeType === Node.TEXT_NODE) {
           node = node.parentElement;
@@ -442,7 +593,18 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                 setSelectedFontSize(String(parsed));
               }
             }
-          } catch (_) {}
+            if (computed && computed.lineHeight) {
+              const parsedLh = parseFloat(computed.lineHeight);
+              const fontSize = parseFloat(computed.fontSize);
+              if (parsedLh && fontSize) {
+                const ratio = (parsedLh / fontSize).toFixed(1);
+                const match = LINE_HEIGHT_OPTIONS.find((o) => o.value === ratio || Math.abs(parseFloat(o.value) - parseFloat(ratio)) < 0.1);
+                if (match) {
+                  setSelectedLineHeight(match.value);
+                }
+              }
+            }
+          } catch (_) { }
         }
         while (node && node.getAttribute && !node.getAttribute('contenteditable')) {
           const styleAlign = node.style?.textAlign;
@@ -603,9 +765,14 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   };
 
   const getActiveIndex = () => {
-    if (!focusedBlockId) return blocks.length - 1;
-    const idx = blocks.findIndex((b) => b.id === focusedBlockId);
-    return idx !== -1 ? idx : blocks.length - 1;
+    if (focusedBlockId) {
+      const idx = blocks.findIndex((b) => b.id === focusedBlockId);
+      if (idx !== -1) return idx;
+    }
+    if (lastActiveIndexRef.current >= 0 && lastActiveIndexRef.current < blocks.length) {
+      return lastActiveIndexRef.current;
+    }
+    return 0;
   };
 
   const syncActiveBlockContent = () => {
@@ -626,7 +793,13 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   // Format Dropdown (H1, H2, H3, p, quote, code) - Strictly apply only to the highlighted text
   const handleFormatDropdownChange = (val) => {
     setSelectedFormat(val);
-    const selection = window.getSelection();
+    let selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      if (savedSelectionRef.current) {
+        restoreSelection();
+        selection = window.getSelection();
+      }
+    }
 
     if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
       const range = selection.getRangeAt(0);
@@ -670,6 +843,12 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
             newEl.appendChild(headingParent.firstChild);
           }
           headingParent.parentNode.replaceChild(newEl, headingParent);
+
+          const newRange = document.createRange();
+          newRange.selectNodeContents(newEl);
+          selection.removeAllRanges();
+          selection.addRange(newRange);
+          savedSelectionRef.current = newRange.cloneRange();
         } else {
           const newEl = document.createElement(tag);
           if (val === 'H1') newEl.className = 'text-2xl md:text-3xl font-bold font-display text-white my-2';
@@ -683,6 +862,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
             newRange.selectNodeContents(newEl);
             selection.removeAllRanges();
             selection.addRange(newRange);
+            savedSelectionRef.current = newRange.cloneRange();
           } catch (_) {
             document.execCommand('formatBlock', false, `<${tag}>`);
           }
@@ -697,6 +877,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
           newRange.selectNodeContents(quoteEl);
           selection.removeAllRanges();
           selection.addRange(newRange);
+          savedSelectionRef.current = newRange.cloneRange();
         } catch (_) {
           document.execCommand('formatBlock', false, '<blockquote>');
         }
@@ -710,6 +891,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
           newRange.selectNodeContents(codeEl);
           selection.removeAllRanges();
           selection.addRange(newRange);
+          savedSelectionRef.current = newRange.cloneRange();
         } catch (_) { }
       }
       updateToolbarActiveStates();
@@ -756,7 +938,14 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     if (isNaN(size) || size < 8 || size > 120) return;
     setSelectedFontSize(String(size));
 
-    const selection = window.getSelection();
+    let selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      if (savedSelectionRef.current) {
+        restoreSelection();
+        selection = window.getSelection();
+      }
+    }
+
     if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
       const range = selection.getRangeAt(0);
 
@@ -765,12 +954,29 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       span.style.lineHeight = '1.35';
 
       try {
-        span.appendChild(range.extractContents());
+        const extracted = range.extractContents();
+        // Remove redundant inner font-size spans
+        if (extracted.querySelectorAll) {
+          const innerSpans = extracted.querySelectorAll('span[style*="font-size"]');
+          innerSpans.forEach((s) => {
+            s.style.fontSize = '';
+            if (!s.getAttribute('style') || s.getAttribute('style').trim() === '') {
+              while (s.firstChild) {
+                s.parentNode.insertBefore(s.firstChild, s);
+              }
+              s.parentNode.removeChild(s);
+            }
+          });
+        }
+        span.appendChild(extracted);
         range.insertNode(span);
+
+        // Keep the selection highlighted on the newly styled text
         const newRange = document.createRange();
         newRange.selectNodeContents(span);
         selection.removeAllRanges();
         selection.addRange(newRange);
+        savedSelectionRef.current = newRange.cloneRange();
       } catch (_) {
         document.execCommand('fontSize', false, '3');
       }
@@ -793,6 +999,56 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     const current = parseInt(selectedFontSize, 10) || 16;
     const prev = [...FONT_SIZES].reverse().find((s) => s < current) || Math.max(9, current - 2);
     applyFontSize(prev);
+  };
+
+  const LINE_HEIGHT_OPTIONS = [
+    { value: '1.0', label: '1.0' },
+    { value: '1.2', label: '1.2' },
+    { value: '1.4', label: '1.4' },
+    { value: '1.6', label: '1.6' },
+    { value: '1.8', label: '1.8' },
+    { value: '2.0', label: '2.0' },
+    { value: '2.5', label: '2.5' },
+  ];
+
+  const applyLineHeight = (val) => {
+    setSelectedLineHeight(String(val));
+    let selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      if (savedSelectionRef.current) {
+        restoreSelection();
+        selection = window.getSelection();
+      }
+    }
+
+    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+      const range = selection.getRangeAt(0);
+      const span = document.createElement('span');
+      span.style.lineHeight = String(val);
+      span.style.display = 'inline-block';
+
+      try {
+        const extracted = range.extractContents();
+        span.appendChild(extracted);
+        range.insertNode(span);
+
+        const newRange = document.createRange();
+        newRange.selectNodeContents(span);
+        selection.removeAllRanges();
+        selection.addRange(newRange);
+        savedSelectionRef.current = newRange.cloneRange();
+      } catch (_) { }
+    }
+
+    const activeIdx = getActiveIndex();
+    const currentBlock = blocks[activeIdx];
+    if (currentBlock) {
+      updateBlock(currentBlock.id, { lineHeight: String(val) });
+    }
+
+    updateToolbarActiveStates();
+    const updated = syncActiveBlockContent();
+    pushHistory(updated);
   };
 
   // Alignment formatting (Apply strictly to the highlighted selection and record to history)
@@ -1125,16 +1381,17 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     insertTableAtCursor();
   };
 
-  const handleInsertLink = () => {
+  const handleLinkAction = () => {
+    saveSelection();
     const selection = window.getSelection();
+    let existingLink = null;
+    let defaultUrl = 'https://';
+
     if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
-      const range = selection.getRangeAt(0);
-      let parent = range.commonAncestorContainer;
+      let parent = selection.getRangeAt(0).commonAncestorContainer;
       if (parent.nodeType === Node.TEXT_NODE) {
         parent = parent.parentElement;
       }
-
-      let existingLink = null;
       let curr = parent;
       while (curr && curr.getAttribute && !curr.getAttribute('contenteditable')) {
         if (curr.tagName.toLowerCase() === 'a') {
@@ -1143,122 +1400,129 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         }
         curr = curr.parentElement;
       }
-
-      const defaultUrl = existingLink ? existingLink.getAttribute('href') : 'https://';
-      const url = prompt(
-        existingLink
-          ? 'Chỉnh sửa đường dẫn liên kết URL (Xóa trống để hủy liên kết):'
-          : 'Nhập đường dẫn liên kết URL (https://...):',
-        defaultUrl
-      );
-
-      if (url === null) return; // Người dùng ấn Cancel
-
-      if (!url.trim() || url.trim() === 'https://') {
-        // Hủy liên kết
-        if (existingLink) {
-          const parentOfLink = existingLink.parentNode;
-          while (existingLink.firstChild) {
-            parentOfLink.insertBefore(existingLink.firstChild, existingLink);
-          }
-          parentOfLink.removeChild(existingLink);
-        } else {
-          document.execCommand('unlink', false, null);
-        }
-      } else {
-        const fullUrl = url.trim().startsWith('http://') || url.trim().startsWith('https://') || url.trim().startsWith('mailto:') || url.trim().startsWith('/')
-          ? url.trim()
-          : `https://${url.trim()}`;
-
-        if (existingLink) {
-          existingLink.setAttribute('href', fullUrl);
-          existingLink.setAttribute('target', '_blank');
-          existingLink.setAttribute('rel', 'noopener noreferrer');
-          existingLink.className = 'text-[#4cd7f6] hover:underline font-medium';
-        } else {
-          const a = document.createElement('a');
-          a.setAttribute('href', fullUrl);
-          a.setAttribute('target', '_blank');
-          a.setAttribute('rel', 'noopener noreferrer');
-          a.className = 'text-[#4cd7f6] hover:underline font-medium';
-          try {
-            a.appendChild(range.extractContents());
-            range.insertNode(a);
-            const newRange = document.createRange();
-            newRange.selectNodeContents(a);
-            selection.removeAllRanges();
-            selection.addRange(newRange);
-          } catch (_) {
-            document.execCommand('createLink', false, fullUrl);
-          }
-        }
+      if (existingLink) {
+        defaultUrl = existingLink.getAttribute('href') || 'https://';
       }
 
-      syncActiveBlockContent();
-      updateToolbarActiveStates();
-      pushHistory(blocks);
+      openPrompt({
+        title: existingLink ? 'Chỉnh sửa liên kết' : 'Chèn liên kết (Hyperlink)',
+        description: 'Nhập đường dẫn URL website để gắn vào văn bản đang chọn:',
+        placeholder: 'https://example.com',
+        defaultValue: defaultUrl,
+        confirmText: existingLink ? 'Cập nhật link' : 'Gắn liên kết',
+        icon: 'link',
+        iconColor: 'sky',
+        onConfirm: (url) => {
+          restoreSelection();
+          if (!url || !url.trim() || url.trim() === 'https://') {
+            if (existingLink) {
+              const parentOfLink = existingLink.parentNode;
+              while (existingLink.firstChild) {
+                parentOfLink.insertBefore(existingLink.firstChild, existingLink);
+              }
+              parentOfLink.removeChild(existingLink);
+            } else {
+              document.execCommand('unlink', false, null);
+            }
+          } else {
+            const fullUrl = url.trim().startsWith('http://') || url.trim().startsWith('https://') || url.trim().startsWith('mailto:') || url.trim().startsWith('/')
+              ? url.trim()
+              : `https://${url.trim()}`;
+
+            if (existingLink) {
+              existingLink.setAttribute('href', fullUrl);
+              existingLink.setAttribute('target', '_blank');
+              existingLink.setAttribute('rel', 'noopener noreferrer');
+              existingLink.className = 'text-[#4cd7f6] hover:underline font-medium';
+            } else {
+              document.execCommand('createLink', false, fullUrl);
+              const activeEl = inputRefs.current[focusedBlockId];
+              if (activeEl) {
+                activeEl.querySelectorAll(`a[href="${fullUrl}"]`).forEach((a) => {
+                  a.setAttribute('target', '_blank');
+                  a.setAttribute('rel', 'noopener noreferrer');
+                  a.className = 'text-[#4cd7f6] hover:underline font-medium';
+                });
+              }
+            }
+          }
+          syncActiveBlockContent();
+          updateToolbarActiveStates();
+          pushHistory(blocks);
+        }
+      });
     } else {
       toast.info('Vui lòng bôi đen (tô đen) đoạn chữ cần chèn đường liên kết');
     }
   };
 
   // Insert video directly into text/paragraph at cursor
-  const insertVideoAtCursor = (videoUrl, caption = '') => {
+  const insertVideoAtCursor = (videoUrl, caption = '', targetIdx = null, split = null) => {
     if (!videoUrl || !videoUrl.trim()) return;
-    const embedUrl = formatVideoEmbedUrl(videoUrl.trim());
     const cleanCaption = caption ? caption.trim() : '';
+    const activeIdx = targetIdx !== null ? targetIdx : (targetBlockIndexRef.current !== null ? targetBlockIndexRef.current : getActiveIndex());
+    targetBlockIndexRef.current = null;
+    const nextParagraphId = `p-${Date.now() + 1}`;
+    const newVideoBlock = {
+      id: `vid-${Date.now()}`,
+      type: 'video',
+      url: videoUrl,
+      caption: cleanCaption || 'Video minh họa'
+    };
+    const afterText = split?.afterText || '';
+    const newParagraphBlock = {
+      id: nextParagraphId,
+      type: 'paragraph',
+      text: afterText === '<br>' || afterText === '<p><br></p>' ? '' : afterText
+    };
 
-    const videoHtml = `<figure class="my-6 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-black shadow-xl block" contenteditable="false"><div class="relative w-full aspect-video"><iframe src="${embedUrl}" title="${cleanCaption || 'Video Player'}" class="w-full h-full border-0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe></div>${cleanCaption ? `<figcaption class="text-xs text-slate-500 dark:text-slate-400 italic text-center py-2 px-3 bg-slate-100 dark:bg-[#100c18] border-t border-slate-200 dark:border-white/5">${cleanCaption}</figcaption>` : ''}</figure><p><br></p>`;
+    setBlocks((prev) => {
+      const newBlocks = [...prev];
+      const validIdx = activeIdx >= 0 && activeIdx < newBlocks.length ? activeIdx : Math.max(0, newBlocks.length - 1);
 
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0 && focusedBlockId) {
-      try {
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = videoHtml;
-        const frag = document.createDocumentFragment();
-        let lastNode = null;
-        while (tempDiv.firstChild) {
-          lastNode = tempDiv.firstChild;
-          frag.appendChild(lastNode);
-        }
-        range.insertNode(frag);
+      if (split && split.blockId && newBlocks[validIdx]?.id === split.blockId) {
+        const beforeText = split.beforeText || '';
+        newBlocks[validIdx] = {
+          ...newBlocks[validIdx],
+          text: beforeText === '<br>' || beforeText === '<p><br></p>' ? '' : beforeText
+        };
+      }
 
-        const newRange = document.createRange();
-        if (lastNode) {
-          newRange.setStartAfter(lastNode);
-          newRange.collapse(true);
-        }
-        selection.removeAllRanges();
-        selection.addRange(newRange);
+      newBlocks.splice(validIdx + 1, 0, newVideoBlock, newParagraphBlock);
+      pushHistory(newBlocks);
+      return newBlocks;
+    });
 
-        syncActiveBlockContent();
-        pushHistory(blocks);
-        return;
-      } catch (_) { }
-    }
+    setFocusedBlockId(nextParagraphId);
+    lastActiveIndexRef.current = (activeIdx >= 0 ? activeIdx : 0) + 2;
 
-    const activeIdx = getActiveIndex();
-    const currentBlock = blocks[activeIdx];
-    if (currentBlock && currentBlock.type === 'paragraph') {
-      const newText = (currentBlock.text || '') + videoHtml;
-      updateBlock(currentBlock.id, { text: newText });
-    } else {
-      insertBlockAt(activeIdx, {
-        id: `p-${Date.now()}`,
-        type: 'paragraph',
-        text: videoHtml
-      });
-    }
-    pushHistory(blocks);
+    setTimeout(() => {
+      if (inputRefs.current[nextParagraphId]) {
+        inputRefs.current[nextParagraphId].focus();
+      }
+    }, 80);
   };
 
   const handleInsertVideo = () => {
-    const url = prompt('Nhập đường dẫn Video (YouTube / Shorts / Vimeo / Embed URL):', 'https://www.youtube.com/watch?v=');
-    if (url && url.trim() && url.trim() !== 'https://www.youtube.com/watch?v=') {
-      insertVideoAtCursor(url.trim());
-    }
+    saveSelection();
+    const ctx = captureCursorContext();
+    const targetIdx = ctx.blockIdx;
+    const splitData = ctx.splitData && (ctx.splitData.beforeText || ctx.splitData.afterText) ? { blockId: ctx.blockId, ...ctx.splitData } : null;
+
+    openPrompt({
+      title: 'Chèn Video trực quan',
+      description: 'Nhập đường dẫn Video (YouTube, YouTube Shorts, Vimeo hoặc Video Embed URL):',
+      placeholder: 'https://www.youtube.com/watch?v=...',
+      defaultValue: 'https://www.youtube.com/watch?v=',
+      confirmText: 'Chèn Video',
+      icon: 'smart_display',
+      iconColor: 'rose',
+      onConfirm: (url) => {
+        if (url && url.trim() && url.trim() !== 'https://www.youtube.com/watch?v=') {
+          insertVideoAtCursor(url.trim(), '', targetIdx, splitData);
+        }
+      }
+    });
   };
 
   const handleInsertDivider = (idx = getActiveIndex()) => {
@@ -1292,44 +1556,10 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   };
 
   // Insert image directly into text/paragraph at cursor with caption and automatically add a new paragraph below for continued writing
-  const insertImageAtCursor = (imageUrl, caption = '', targetIdx = null) => {
+  const insertImageAtCursor = (imageUrl, caption = '', targetIdx = null, split = null) => {
     const cleanCaption = caption || '';
-    const imgHtml = cleanCaption
-      ? `<figure class="my-4 text-center block" contenteditable="false"><img src="${imageUrl}" alt="${cleanCaption}" class="max-h-[420px] max-w-full rounded-xl object-cover block mx-auto shadow-lg" /><figcaption class="text-xs text-[#ad8888] italic text-center mt-1.5 font-medium" contenteditable="true">${cleanCaption}</figcaption></figure>`
-      : `<img src="${imageUrl}" alt="Hình ảnh bài viết" class="my-3 max-h-[420px] max-w-full rounded-xl object-cover block mx-auto shadow-lg" contenteditable="false" />`;
-
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0 && focusedBlockId && targetIdx === null) {
-      try {
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = imgHtml;
-        const imgNode = tempDiv.firstChild;
-        range.insertNode(imgNode);
-
-        // Add a new empty paragraph immediately below the inserted image so the user can write text right away
-        const afterP = document.createElement('p');
-        afterP.innerHTML = '<br>';
-        if (imgNode.nextSibling) {
-          imgNode.parentNode.insertBefore(afterP, imgNode.nextSibling);
-        } else {
-          imgNode.parentNode.appendChild(afterP);
-        }
-
-        const newRange = document.createRange();
-        newRange.setStart(afterP, 0);
-        newRange.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(newRange);
-
-        syncActiveBlockContent();
-        pushHistory(blocks);
-        return;
-      } catch (_) { }
-    }
-
-    const activeIdx = targetIdx !== null ? targetIdx : (targetBlockIndex !== null ? targetBlockIndex : getActiveIndex());
+    const activeIdx = targetIdx !== null ? targetIdx : (targetBlockIndexRef.current !== null ? targetBlockIndexRef.current : getActiveIndex());
+    targetBlockIndexRef.current = null;
     const nextParagraphId = `p-${Date.now() + 1}`;
     const newImageBlock = {
       id: `img-${Date.now()}`,
@@ -1337,22 +1567,32 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       url: imageUrl,
       caption: cleanCaption || 'Hình ảnh minh họa (.webp)'
     };
+    const afterText = split?.afterText || '';
     const newParagraphBlock = {
       id: nextParagraphId,
       type: 'paragraph',
-      text: ''
+      text: afterText === '<br>' || afterText === '<p><br></p>' ? '' : afterText
     };
 
     setBlocks((prev) => {
       const newBlocks = [...prev];
-      const insertAt = activeIdx >= 0 && activeIdx < newBlocks.length ? activeIdx + 1 : newBlocks.length;
-      newBlocks.splice(insertAt, 0, newImageBlock, newParagraphBlock);
+      const validIdx = activeIdx >= 0 && activeIdx < newBlocks.length ? activeIdx : Math.max(0, newBlocks.length - 1);
+
+      if (split && split.blockId && newBlocks[validIdx]?.id === split.blockId) {
+        const beforeText = split.beforeText || '';
+        newBlocks[validIdx] = {
+          ...newBlocks[validIdx],
+          text: beforeText === '<br>' || beforeText === '<p><br></p>' ? '' : beforeText
+        };
+      }
+
+      newBlocks.splice(validIdx + 1, 0, newImageBlock, newParagraphBlock);
       pushHistory(newBlocks);
       return newBlocks;
     });
 
-    setTargetBlockIndex(null);
     setFocusedBlockId(nextParagraphId);
+    lastActiveIndexRef.current = (activeIdx >= 0 ? activeIdx : 0) + 2;
 
     setTimeout(() => {
       if (inputRefs.current[nextParagraphId]) {
@@ -1361,8 +1601,13 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     }, 80);
   };
 
-  const triggerImageUploadAt = (idx = getActiveIndex()) => {
-    setTargetBlockIndex(idx);
+  const triggerImageUploadAt = (idx) => {
+    saveSelection();
+    const ctx = captureCursorContext();
+    const targetIdx = idx !== undefined && idx !== null ? idx : ctx.blockIdx;
+    targetBlockIndexRef.current = targetIdx;
+    setTargetBlockIndex(targetIdx);
+    splitContextRef.current = ctx.splitData && (ctx.splitData.beforeText || ctx.splitData.afterText) ? { blockId: ctx.blockId, ...ctx.splitData } : null;
     fileInputRef.current?.click();
   };
 
@@ -1376,52 +1621,245 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     }
 
     const fileName = file.name;
+    const tempBlockId = isCover ? null : `img-${Date.now()}`;
+    const nextParagraphId = isCover ? null : `p-${Date.now() + 1}`;
 
-    try {
-      // 1. Client-side canvas compression to WebP to reduce file size by 80-90% & accelerate uploads
-      const { base64: base64Data, blob: compressedBlob } = await compressImageFile(file, {
-        maxWidth: 1600,
-        maxHeight: 1600,
-        quality: 0.85
+    if (isCover) {
+      setCoverUploadState({
+        uploading: true
       });
-      let uploadedUrl = base64Data;
+    } else {
+      const activeIdx = targetBlockIndexRef.current !== null
+        ? targetBlockIndexRef.current
+        : getActiveIndex();
+      const split = splitContextRef.current;
+      targetBlockIndexRef.current = null;
+      splitContextRef.current = null;
+      setTargetBlockIndex(null);
 
-      // 2. Upload to Cloudinary via backend API
-      let uploadSuccess = false;
+      const newImageBlock = {
+        id: tempBlockId,
+        type: 'image',
+        url: '',
+        caption: fileName,
+        uploading: true
+      };
+      const afterText = split?.afterText || '';
+      const newParagraphBlock = {
+        id: nextParagraphId,
+        type: 'paragraph',
+        text: afterText === '<br>' || afterText === '<p><br></p>' ? '' : afterText
+      };
+
+      setBlocks((prev) => {
+        const newBlocks = [...prev];
+        const validIdx = activeIdx >= 0 && activeIdx < newBlocks.length ? activeIdx : Math.max(0, newBlocks.length - 1);
+
+        if (split && split.blockId && newBlocks[validIdx]?.id === split.blockId) {
+          const beforeText = split.beforeText || '';
+          newBlocks[validIdx] = {
+            ...newBlocks[validIdx],
+            text: beforeText === '<br>' || beforeText === '<p><br></p>' ? '' : beforeText
+          };
+        }
+
+        newBlocks.splice(validIdx + 1, 0, newImageBlock, newParagraphBlock);
+        pushHistory(newBlocks);
+        return newBlocks;
+      });
+
+      setFocusedBlockId(nextParagraphId);
+      lastActiveIndexRef.current = (activeIdx >= 0 ? activeIdx : 0) + 2;
+    }
+
+    // Parallel upload process
+    const uploadTask = async () => {
       try {
-        const apiRes = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image: base64Data,
-            folder: isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks'
-          })
+        // 1. Client-side canvas compression to WebP to reduce file size by 80-90% & accelerate uploads
+        const { base64: base64Data, blob: compressedBlob } = await compressImageFile(file, {
+          maxWidth: 1600,
+          maxHeight: 1600,
+          quality: 0.85
         });
+        let uploadedUrl = base64Data;
 
-        if (apiRes.ok) {
-          const apiData = await apiRes.json();
-          if (apiData.success && apiData.url) {
-            uploadedUrl = apiData.url;
-            uploadSuccess = true;
+        // 2. Upload to Cloudinary via backend API
+        let uploadSuccess = false;
+        try {
+          const apiRes = await fetch('/api/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image: base64Data,
+              folder: isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks'
+            })
+          });
+
+          if (apiRes.ok) {
+            const apiData = await apiRes.json();
+            if (apiData.success && apiData.url) {
+              uploadedUrl = apiData.url;
+              uploadSuccess = true;
+            }
+          }
+        } catch (err) {
+          console.warn('Backend upload offline:', err);
+        }
+
+        // 3. Direct Cloudinary upload fallback if server API was not reached
+        if (!uploadSuccess) {
+          const cloudName = 'ai1z2oaj';
+          const uploadPreset = 'dudi_blog_preset';
+
+          if (cloudName && uploadPreset && uploadPreset !== 'YOUR_UPLOAD_PRESET') {
+            try {
+              const formData = new FormData();
+              formData.append('file', compressedBlob || file);
+              formData.append('upload_preset', uploadPreset);
+              formData.append('folder', isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks');
+
+              const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+                method: 'POST',
+                body: formData
+              });
+
+              if (res.ok) {
+                const data = await res.json();
+                if (data.secure_url) {
+                  uploadedUrl = data.secure_url;
+                  uploadSuccess = true;
+                }
+              }
+            } catch (cloudErr) {
+              console.warn('[Cloudinary Upload Fallback]', cloudErr);
+            }
           }
         }
+        return uploadedUrl;
       } catch (err) {
-        console.warn('Backend upload offline:', err);
+        console.warn('Lỗi nén/upload ảnh:', err);
+        return null;
+      }
+    };
+
+    try {
+      const uploadedUrl = await uploadTask();
+
+      if (uploadedUrl) {
+        if (isCover) {
+          setCoverImage(uploadedUrl);
+          toast.success('Đã tải lên ảnh bìa thành công!');
+        } else {
+          setBlocks((prev) => prev.map((b) => b.id === tempBlockId ? { ...b, uploading: false, url: uploadedUrl, caption: fileName } : b));
+          pushHistory(blocks);
+          toast.success('Đã chèn ảnh bài viết thành công!');
+        }
+      } else {
+        if (!isCover) {
+          setBlocks((prev) => prev.filter((b) => b.id !== tempBlockId));
+        }
+        toast.error('Không thể xử lý hình ảnh');
+      }
+    } catch (err) {
+      if (!isCover) {
+        setBlocks((prev) => prev.filter((b) => b.id !== tempBlockId));
+      }
+      toast.error('Lỗi khi tải ảnh: ' + err.message);
+    } finally {
+      if (isCover) {
+        setTimeout(() => setCoverUploadState(null), 300);
+      }
+      e.target.value = '';
+    }
+  };
+
+  const triggerVideoUploadAt = (idx) => {
+    saveSelection();
+    const ctx = captureCursorContext();
+    const targetIdx = idx !== undefined && idx !== null ? idx : ctx.blockIdx;
+    targetBlockIndexRef.current = targetIdx;
+    setTargetBlockIndex(targetIdx);
+    splitContextRef.current = ctx.splitData && (ctx.splitData.beforeText || ctx.splitData.afterText) ? { blockId: ctx.blockId, ...ctx.splitData } : null;
+    videoFileInputRef.current?.click();
+  };
+
+  const handleVideoFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('video/')) {
+      toast.warning('Vui lòng chọn tệp video hợp lệ (.mp4, .webm, .mov,...)');
+      return;
+    }
+
+    if (file.size > 100 * 1024 * 1024) {
+      toast.warning('Dung lượng video vượt quá 100MB, vui lòng chọn video ngắn hơn');
+      return;
+    }
+
+    const fileName = file.name;
+    const tempBlockId = `vid-${Date.now()}`;
+    const nextParagraphId = `p-${Date.now() + 1}`;
+
+    const activeIdx = targetBlockIndexRef.current !== null
+      ? targetBlockIndexRef.current
+      : getActiveIndex();
+    const split = splitContextRef.current;
+    targetBlockIndexRef.current = null;
+    splitContextRef.current = null;
+    setTargetBlockIndex(null);
+
+    const newVideoBlock = {
+      id: tempBlockId,
+      type: 'video',
+      url: '',
+      caption: fileName,
+      uploading: true
+    };
+    const afterText = split?.afterText || '';
+    const newParagraphBlock = {
+      id: nextParagraphId,
+      type: 'paragraph',
+      text: afterText === '<br>' || afterText === '<p><br></p>' ? '' : afterText
+    };
+
+    setBlocks((prev) => {
+      const newBlocks = [...prev];
+      const validIdx = activeIdx >= 0 && activeIdx < newBlocks.length ? activeIdx : Math.max(0, newBlocks.length - 1);
+
+      if (split && split.blockId && newBlocks[validIdx]?.id === split.blockId) {
+        const beforeText = split.beforeText || '';
+        newBlocks[validIdx] = {
+          ...newBlocks[validIdx],
+          text: beforeText === '<br>' || beforeText === '<p><br></p>' ? '' : beforeText
+        };
       }
 
-      // 3. Direct Cloudinary upload fallback if server API was not reached
-      if (!uploadSuccess) {
+      newBlocks.splice(validIdx + 1, 0, newVideoBlock, newParagraphBlock);
+      pushHistory(newBlocks);
+      return newBlocks;
+    });
+
+    setFocusedBlockId(nextParagraphId);
+    lastActiveIndexRef.current = (activeIdx >= 0 ? activeIdx : 0) + 2;
+
+    const uploadTask = async () => {
+      try {
+        let uploadedUrl = null;
+
+        // 1. Direct Cloudinary upload with FormData
         const cloudName = 'ai1z2oaj';
         const uploadPreset = 'dudi_blog_preset';
 
         if (cloudName && uploadPreset && uploadPreset !== 'YOUR_UPLOAD_PRESET') {
           try {
             const formData = new FormData();
-            formData.append('file', compressedBlob || file);
+            formData.append('file', file);
             formData.append('upload_preset', uploadPreset);
-            formData.append('folder', isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks');
+            formData.append('folder', 'dudi_blog/videos');
+            formData.append('resource_type', 'video');
 
-            const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+            const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/video/upload`, {
               method: 'POST',
               body: formData
             });
@@ -1430,32 +1868,65 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
               const data = await res.json();
               if (data.secure_url) {
                 uploadedUrl = data.secure_url;
-                uploadSuccess = true;
               }
             }
           } catch (cloudErr) {
-            console.warn('[Cloudinary Upload Fallback]', cloudErr);
+            console.warn('[Cloudinary Direct Video Upload]', cloudErr);
           }
         }
-      }
 
-      if (isCover) {
-        setCoverImage(uploadedUrl);
+        // 2. Backend upload endpoint fallback
+        if (!uploadedUrl) {
+          try {
+            const base64Data = await readFileAsBase64(file);
+            const apiRes = await fetch('/api/upload/video', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                video: base64Data,
+                folder: 'dudi_blog/videos'
+              })
+            });
+
+            if (apiRes.ok) {
+              const apiData = await apiRes.json();
+              if (apiData.success && apiData.url) {
+                uploadedUrl = apiData.url;
+              }
+            }
+          } catch (err) {
+            console.warn('Backend video upload offline:', err);
+          }
+        }
+
+        // 3. Local Object URL fallback if network upload fails
+        if (!uploadedUrl) {
+          uploadedUrl = URL.createObjectURL(file);
+        }
+
+        return uploadedUrl;
+      } catch (err) {
+        console.warn('Lỗi upload video:', err);
+        return URL.createObjectURL(file);
+      }
+    };
+
+    try {
+      const uploadedUrl = await uploadTask();
+
+      if (uploadedUrl) {
+        setBlocks((prev) => prev.map((b) => b.id === tempBlockId ? { ...b, uploading: false, url: uploadedUrl, caption: fileName } : b));
+        pushHistory(blocks);
+        toast.success('Đã chèn video thành công!');
       } else {
-        insertImageAtCursor(uploadedUrl, fileName);
+        setBlocks((prev) => prev.filter((b) => b.id !== tempBlockId));
+        toast.error('Không thể xử lý video');
       }
     } catch (err) {
-      console.warn('Lỗi nén/upload ảnh:', err);
+      setBlocks((prev) => prev.filter((b) => b.id !== tempBlockId));
+      toast.error('Lỗi khi tải video: ' + err.message);
     } finally {
       e.target.value = '';
-    }
-  };
-
-  const handleInsertImageUrlAt = () => {
-    const url = prompt('Nhập đường dẫn URL hình ảnh (.webp, .png, .jpg):');
-    if (url && url.trim()) {
-      const urlFileName = url.trim().split('/').pop()?.split('?')[0] || 'Ảnh minh họa WebP';
-      insertImageAtCursor(url.trim(), urlFileName);
     }
   };
 
@@ -1587,6 +2058,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       slug: slug || title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w\s-]/g, '').replace(/\s+/g, '-'),
       category,
       summary: summary || 'Tóm tắt bài viết...',
+      sapo: summary || 'Tóm tắt bài viết...',
       blocks,
       coverImage: coverImage || firstImgBlock?.url || 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80&fm=webp',
       tags: tags.length > 0 ? tags : ['#DUDISoftware', '#TechNews'],
@@ -1662,6 +2134,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       subCategory: category,
       tag: (category || 'TIN TỨC').toUpperCase(),
       summary: summary || 'Tóm tắt bài viết xem trước...',
+      sapo: summary || 'Tóm tắt bài viết xem trước...',
       blocks,
       coverImage: coverImage || firstImgBlock?.url || 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80&fm=webp',
       tags: tags.length > 0 ? tags : ['#DUDISoftware', '#Preview'],
@@ -1695,6 +2168,13 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       />
       <input
         type="file"
+        ref={videoFileInputRef}
+        onChange={handleVideoFileUpload}
+        accept="video/mp4,video/webm,video/ogg,video/quicktime,video/*"
+        className="hidden"
+      />
+      <input
+        type="file"
         ref={coverFileInputRef}
         onChange={(e) => handleFileUpload(e, true)}
         accept="image/webp,image/png,image/jpeg,image/gif"
@@ -1718,11 +2198,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
               {postToEdit ? 'Chỉnh sửa' : 'Soạn mới'}
             </span>
           </nav>
-          <div className="h-4 w-px bg-slate-300 dark:bg-[#373340] hidden md:block"></div>
-          <div className="hidden md:flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-[#2c2835] text-slate-600 dark:text-[#ad8888] font-mono text-[11px] flex-shrink-0 border border-slate-200 dark:border-transparent">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Đã tự động lưu: {lastSavedTime}</span>
-          </div>
         </div>
 
         {/* Action Buttons */}
@@ -1787,263 +2262,389 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         </div>
       </div>
 
-      {/* Floating Toolbar Ribbon (Exact match to requested UI with Word-like WYSIWYG) */}
-      <div className="sticky top-[52px] sm:top-[58px] z-20 w-full bg-white/95 dark:bg-[#140e20]/95 backdrop-blur-2xl py-2 px-2 sm:px-4 shadow-sm dark:shadow-[0_12px_24px_rgba(0,0,0,0.55)] border-b border-slate-200 dark:border-[#352b48] transition-colors">
-        <div className="max-w-[1500px] mx-auto flex items-center justify-start md:justify-center overflow-x-auto py-0.5 no-scrollbar touch-pan-x">
-          <div className="inline-flex items-center gap-1.5 sm:gap-2.5 p-1 sm:p-1.5 rounded-2xl bg-slate-50 dark:bg-[#1a1329] border border-slate-200 dark:border-[#483966] shadow-sm dark:shadow-2xl flex-nowrap min-w-max relative transition-colors">
+      {/* Floating Toolbar Ribbon (Unified with outer bar) */}
+      <div className="sticky top-[52px] sm:top-[58px] z-30 w-full bg-slate-50/95 dark:bg-[#161024]/95 backdrop-blur-2xl py-1.5 px-2 sm:px-4 shadow-sm dark:shadow-[0_12px_24px_rgba(0,0,0,0.55)] border-b border-slate-200 dark:border-[#352b48] transition-colors">
+        <div className="max-w-[1500px] mx-auto flex items-center justify-center gap-1 sm:gap-1.5 flex-wrap">
 
-            {/* GROUP 1: Undo / Redo + Heading Dropdown */}
-            <div className="flex items-center gap-1 bg-white dark:bg-[#1e192a] border border-slate-200 dark:border-[#352f44] rounded-xl p-1 shadow-inner">
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleUndo}
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95 transition-all"
-                title="Hoàn tác (Undo - Ctrl+Z)"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">undo</span>
-              </button>
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleRedo}
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95 transition-all"
-                title="Làm lại (Redo - Ctrl+Y)"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">redo</span>
-              </button>
+          {/* GROUP 1: Undo / Redo + Heading Dropdown */}
+          <div className="flex items-center gap-0.5 bg-white dark:bg-[#1e192a] border border-slate-200 dark:border-[#352f44] rounded-xl p-0.5 shadow-sm">
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleUndo}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95 transition-all"
+              title="Hoàn tác (Undo - Ctrl+Z)"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">undo</span>
+            </button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleRedo}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95 transition-all"
+              title="Làm lại (Redo - Ctrl+Y)"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">redo</span>
+            </button>
 
-              <div className="relative inline-flex items-center">
-                <select
-                  value={selectedFormat}
-                  onChange={(e) => handleFormatDropdownChange(e.target.value)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="appearance-none bg-transparent hover:bg-slate-100 dark:hover:bg-[#2c2835]/60 text-slate-800 dark:text-[#e8dff1] text-xs font-semibold pl-2.5 pr-6 py-1 rounded-lg outline-none cursor-pointer transition-colors"
-                >
-                  <option className="bg-white dark:bg-[#1e1a26] text-slate-800 dark:text-[#e8dff1] py-1" value="H2">Tiêu đề H2</option>
-                  <option className="bg-white dark:bg-[#1e1a26] text-slate-800 dark:text-[#e8dff1] py-1" value="H1">Tiêu đề H1</option>
-                  <option className="bg-white dark:bg-[#1e1a26] text-slate-800 dark:text-[#e8dff1] py-1" value="H3">Tiêu đề H3</option>
-                  <option className="bg-white dark:bg-[#1e1a26] text-slate-800 dark:text-[#e8dff1] py-1" value="p">Đoạn văn</option>
-                  <option className="bg-white dark:bg-[#1e1a26] text-slate-800 dark:text-[#e8dff1] py-1" value="quote">Trích dẫn</option>
-                  <option className="bg-white dark:bg-[#1e1a26] text-slate-800 dark:text-[#e8dff1] py-1" value="code">Mã nguồn (Code)</option>
-                </select>
-                <span className="material-symbols-outlined text-[15px] text-slate-400 dark:text-[#ad8888] absolute right-1.5 pointer-events-none">
+            {/* Custom Format Dropdown */}
+            <div className="relative inline-flex items-center" ref={formatDropdownRef}>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={() => {
+                  setIsFormatDropdownOpen((prev) => !prev);
+                  setIsFontSizeDropdownOpen(false);
+                  setIsLineHeightDropdownOpen(false);
+                }}
+                className="flex items-center justify-between gap-1 hover:bg-slate-100 dark:hover:bg-[#2c2835]/60 text-slate-800 dark:text-[#e8dff1] text-xs font-semibold pl-2 pr-1 py-1 rounded-lg outline-none cursor-pointer transition-colors"
+                title="Định dạng khối văn bản"
+              >
+                <span className="text-[11px] font-medium">
+                  {selectedFormat === 'H1' ? 'Tiêu đề H1' :
+                    selectedFormat === 'H2' ? 'Tiêu đề H2' :
+                      selectedFormat === 'H3' ? 'Tiêu đề H3' :
+                        selectedFormat === 'quote' ? 'Trích dẫn' :
+                          selectedFormat === 'code' ? 'Mã nguồn' : 'Đoạn văn'}
+                </span>
+                <span className={`material-symbols-outlined text-[14px] text-slate-400 dark:text-[#ad8888] transition-transform duration-150 ${isFormatDropdownOpen ? 'rotate-180' : ''}`}>
                   arrow_drop_down
                 </span>
-              </div>
-            </div>
-
-            {/* GROUP 2: Typography (B, I, U, S | Color, Pen) */}
-            <div className="flex items-center gap-1 bg-white dark:bg-[#1e192a] border border-slate-200 dark:border-[#352f44] rounded-xl p-1 shadow-inner relative">
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleBoldToggle}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg font-bold text-xs active:scale-95 transition-all ${isBoldActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm font-bold' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="In đậm chữ (B) - Ctrl+B"
-                type="button"
-              >
-                B
               </button>
 
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleItalicToggle}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg font-serif italic text-xs font-semibold active:scale-95 transition-all ${isItalicActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm font-bold' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="In nghiêng (I) - Ctrl+I"
-                type="button"
-              >
-                I
-              </button>
-
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleUnderlineToggle}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg underline text-xs font-semibold active:scale-95 transition-all ${isUnderlineActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm font-bold' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Gạch chân (U) - Ctrl+U"
-                type="button"
-              >
-                U
-              </button>
-
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={handleStrikethroughToggle}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isStrikethroughActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Gạch ngang chữ (S)"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">strikethrough_s</span>
-              </button>
-
-              <div className="h-4 w-px bg-slate-300 dark:bg-[#352f44] mx-0.5"></div>
-
-              {/* Word-like Font Size Dropdown */}
-              <div className="relative inline-flex items-center bg-slate-100 dark:bg-[#251d36] rounded-lg border border-slate-200 dark:border-[#3d3353]">
-                <select
-                  value={selectedFontSize}
-                  onChange={(e) => applyFontSize(e.target.value)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="appearance-none bg-transparent hover:bg-slate-200/60 dark:hover:bg-[#352b48] text-slate-800 dark:text-[#e8dff1] text-xs font-bold pl-2.5 pr-6 py-1 rounded-lg outline-none cursor-pointer transition-colors w-[52px] text-center"
-                  title="Cỡ chữ (Font size)"
-                >
-                  {[9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 48, 60, 72].map((sz) => (
-                    <option
-                      key={sz}
-                      value={sz}
-                      className="bg-white dark:bg-[#1e1a26] text-slate-800 dark:text-[#e8dff1] py-1 text-center font-medium"
+              {isFormatDropdownOpen && (
+                <div className="absolute top-full mt-1.5 left-0 z-50 bg-white dark:bg-[#1e1a26] border border-slate-200 dark:border-[#3d3353] rounded-xl shadow-xl py-1 w-44">
+                  {[
+                    { value: 'H2', label: 'Tiêu đề H2' },
+                    { value: 'H1', label: 'Tiêu đề H1' },
+                    { value: 'H3', label: 'Tiêu đề H3' },
+                    { value: 'p', label: 'Đoạn văn' },
+                    { value: 'quote', label: 'Trích dẫn' },
+                    { value: 'code', label: 'Mã nguồn (Code)' },
+                  ].map((fmt) => (
+                    <button
+                      key={fmt.value}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onClick={() => {
+                        handleFormatDropdownChange(fmt.value);
+                        setIsFormatDropdownOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors ${selectedFormat === fmt.value
+                          ? 'bg-[#ff5167]/15 text-[#ff5167] font-bold'
+                          : 'text-slate-700 dark:text-[#e8dff1] hover:bg-slate-100 dark:hover:bg-[#2c2835]'
+                        }`}
                     >
-                      {sz}
-                    </option>
+                      <span>{fmt.label}</span>
+                      {selectedFormat === fmt.value && (
+                        <span className="material-symbols-outlined text-[14px] text-[#ff5167]">check</span>
+                      )}
+                    </button>
                   ))}
-                </select>
-                <span className="material-symbols-outlined text-[14px] text-slate-400 dark:text-[#ad8888] absolute right-1 pointer-events-none">
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* GROUP 2: Typography (B, I, U, S | Font Size) */}
+          <div className="flex items-center gap-0.5 bg-white dark:bg-[#1e192a] border border-slate-200 dark:border-[#352f44] rounded-xl p-0.5 shadow-sm relative">
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleBoldToggle}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg font-bold text-xs active:scale-95 transition-all ${isBoldActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm font-bold' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="In đậm chữ (B) - Ctrl+B"
+              type="button"
+            >
+              B
+            </button>
+
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleItalicToggle}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg font-serif italic text-xs font-semibold active:scale-95 transition-all ${isItalicActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm font-bold' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="In nghiêng (I) - Ctrl+I"
+              type="button"
+            >
+              I
+            </button>
+
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleUnderlineToggle}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg underline text-xs font-semibold active:scale-95 transition-all ${isUnderlineActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm font-bold' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="Gạch chân (U) - Ctrl+U"
+              type="button"
+            >
+              U
+            </button>
+
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleStrikethroughToggle}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isStrikethroughActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="Gạch ngang chữ (S)"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">strikethrough_s</span>
+            </button>
+
+            <div className="h-4 w-px bg-slate-300 dark:bg-[#352f44] mx-0.5"></div>
+
+            {/* Custom Word-like Font Size Dropdown */}
+            <div className="relative inline-flex items-center" ref={fontSizeDropdownRef}>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={() => {
+                  setIsFontSizeDropdownOpen((prev) => !prev);
+                  setIsFormatDropdownOpen(false);
+                  setIsLineHeightDropdownOpen(false);
+                }}
+                className="flex items-center justify-between gap-0.5 bg-slate-100 hover:bg-slate-200/80 dark:bg-[#251d36] dark:hover:bg-[#352b48] text-slate-800 dark:text-[#e8dff1] text-xs font-bold px-1.5 py-1 rounded-lg border border-slate-200 dark:border-[#3d3353] outline-none cursor-pointer transition-colors min-w-[46px]"
+                title="Cỡ chữ (Font size)"
+              >
+                <span className="text-[11px]">{selectedFontSize}</span>
+                <span className={`material-symbols-outlined text-[13px] text-slate-400 dark:text-[#ad8888] transition-transform duration-150 ${isFontSizeDropdownOpen ? 'rotate-180' : ''}`}>
                   arrow_drop_down
                 </span>
-              </div>
+              </button>
+
+              {isFontSizeDropdownOpen && (
+                <div className="absolute top-full mt-1.5 left-0 z-50 bg-white dark:bg-[#1e1a26] border border-slate-200 dark:border-[#3d3353] rounded-xl shadow-xl py-1 max-h-56 overflow-y-auto w-24 custom-scrollbar">
+                  {FONT_SIZES.map((sz) => (
+                    <button
+                      key={sz}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onClick={() => {
+                        applyFontSize(sz);
+                        setIsFontSizeDropdownOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-1 text-xs text-left transition-colors ${String(selectedFontSize) === String(sz)
+                          ? 'bg-[#ff5167]/15 text-[#ff5167] font-bold'
+                          : 'text-slate-700 dark:text-[#e8dff1] hover:bg-slate-100 dark:hover:bg-[#2c2835]'
+                        }`}
+                    >
+                      <span>{sz}px</span>
+                      {String(selectedFontSize) === String(sz) && (
+                        <span className="material-symbols-outlined text-[14px] text-[#ff5167]">check</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* GROUP 3: Alignment, Line Spacing, Lists, Quote & Code */}
+          <div className="flex items-center gap-0.5 bg-white dark:bg-[#1e192a] border border-slate-200 dark:border-[#352f44] rounded-xl p-0.5 shadow-sm">
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleAlignmentChange('left')}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${textAlign === 'left' ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="Căn trái"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">format_align_left</span>
+            </button>
+
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleAlignmentChange('center')}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${textAlign === 'center' ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="Căn giữa"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">format_align_center</span>
+            </button>
+
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleAlignmentChange('right')}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${textAlign === 'right' ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="Căn phải"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">format_align_right</span>
+            </button>
+
+            {/* Line Spacing / Line Height Dropdown */}
+            <div className="relative inline-flex items-center" ref={lineHeightDropdownRef}>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={() => {
+                  setIsLineHeightDropdownOpen((prev) => !prev);
+                  setIsFormatDropdownOpen(false);
+                  setIsFontSizeDropdownOpen(false);
+                }}
+                className={`h-7 flex items-center gap-0.5 px-1 rounded-lg active:scale-95 transition-all ${isLineHeightDropdownOpen
+                    ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm font-bold'
+                    : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'
+                  }`}
+                title="Giãn cách dòng (Line Spacing)"
+              >
+                <span className="material-symbols-outlined text-[16px]">format_line_spacing</span>
+                <span className="text-[10px] font-bold">{selectedLineHeight}</span>
+              </button>
+
+              {isLineHeightDropdownOpen && (
+                <div className="absolute top-full mt-1.5 left-0 z-50 bg-white dark:bg-[#1e1a26] border border-slate-200 dark:border-[#3d3353] rounded-xl shadow-xl py-1 w-36">
+                  <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-[#8f7eab] border-b border-slate-100 dark:border-[#2d253d] mb-1">
+                    Giãn cách dòng
+                  </div>
+                  {LINE_HEIGHT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onClick={() => {
+                        applyLineHeight(opt.value);
+                        setIsLineHeightDropdownOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors ${String(selectedLineHeight) === String(opt.value)
+                          ? 'bg-[#ff5167]/15 text-[#ff5167] font-bold'
+                          : 'text-slate-700 dark:text-[#e8dff1] hover:bg-slate-100 dark:hover:bg-[#2c2835]'
+                        }`}
+                    >
+                      <span>{opt.label}</span>
+                      {String(selectedLineHeight) === String(opt.value) && (
+                        <span className="material-symbols-outlined text-[14px] text-[#ff5167]">check</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* GROUP 3: Alignment, Lists, Quote & Code */}
-            <div className="flex items-center gap-1 bg-white dark:bg-[#1e192a] border border-slate-200 dark:border-[#352f44] rounded-xl p-1 shadow-inner">
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleAlignmentChange('left')}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${textAlign === 'left' ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Căn trái"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">format_align_left</span>
-              </button>
+            <div className="h-4 w-px bg-slate-300 dark:bg-[#352f44] mx-0.5"></div>
 
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleAlignmentChange('center')}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${textAlign === 'center' ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Căn giữa"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">format_align_center</span>
-              </button>
+            {/* Bullet List */}
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertBulletList()}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isBulletListActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="Danh sách gạch đầu dòng"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">format_list_bulleted</span>
+            </button>
 
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleAlignmentChange('right')}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${textAlign === 'right' ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Căn phải"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">format_align_right</span>
-              </button>
+            {/* Numbered List */}
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertNumberedList()}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isNumberedListActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="Danh sách đánh số thứ tự"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">format_list_numbered</span>
+            </button>
 
-              <div className="h-4 w-px bg-slate-300 dark:bg-[#352f44] mx-0.5"></div>
+            {/* Quote 99 */}
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertQuote()}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg font-serif font-bold text-xs active:scale-95 transition-all ${isQuoteActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="Khối trích dẫn (Quote)"
+              type="button"
+            >
+              99
+            </button>
 
-              {/* Bullet List */}
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleInsertBulletList()}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isBulletListActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Danh sách gạch đầu dòng"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">format_list_bulleted</span>
-              </button>
+            {/* Code Block </> */}
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertCode()}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isCodeActive ? 'bg-sky-100 dark:bg-[#4cd7f6]/25 text-sky-600 dark:text-[#4cd7f6] border border-sky-300 dark:border-[#4cd7f6]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="Khối mã nguồn (Code </>)"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">code</span>
+            </button>
+          </div>
 
-              {/* Numbered List */}
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleInsertNumberedList()}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isNumberedListActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Danh sách đánh số thứ tự"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">format_list_numbered</span>
-              </button>
+          {/* GROUP 4: Insert Media, Table, Link, Divider */}
+          <div className="flex items-center gap-0.5 bg-white dark:bg-[#1e192a] border border-slate-200 dark:border-[#352f44] rounded-xl p-0.5 shadow-sm">
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => triggerImageUploadAt()}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky-50 dark:bg-[#221e2e] text-sky-600 dark:text-[#4cd7f6] hover:bg-sky-100 dark:hover:bg-[#2c2838] hover:brightness-110 transition-all text-xs font-semibold border border-sky-200 dark:border-[#3a3348] shadow-sm"
+              title="Tải ảnh từ máy và chèn trực tiếp vào vị trí con trỏ"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[16px]">add_photo_alternate</span>
+              <span className="text-[11px]">Chèn ảnh</span>
+            </button>
 
-              {/* Quote 99 */}
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleInsertQuote()}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg font-serif font-bold text-xs active:scale-95 transition-all ${isQuoteActive ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Khối trích dẫn (Quote)"
-                type="button"
-              >
-                99
-              </button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => triggerVideoUploadAt()}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-50 dark:bg-[#2e1a24] text-rose-600 dark:text-[#ff5167] hover:bg-rose-100 dark:hover:bg-[#3c212f] hover:brightness-110 transition-all text-xs font-semibold border border-rose-200 dark:border-[#52293b] shadow-sm"
+              title="Tải video từ máy tính và chèn trực tiếp vào vị trí con trỏ"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[16px]">video_file</span>
+              <span className="text-[11px]">Tải video</span>
+            </button>
 
-              {/* Code Block </> */}
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleInsertCode()}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isCodeActive ? 'bg-sky-100 dark:bg-[#4cd7f6]/25 text-sky-600 dark:text-[#4cd7f6] border border-sky-300 dark:border-[#4cd7f6]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Khối mã nguồn (Code </>)"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">code</span>
-              </button>
-            </div>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertVideo()}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835] transition-all"
+              title="Chèn Video Embed (YouTube / Vimeo)"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">smart_display</span>
+            </button>
 
-            {/* GROUP 4: Insert Media, Table, Link, Divider */}
-            <div className="flex items-center gap-1.5 bg-white dark:bg-[#1e192a] border border-slate-200 dark:border-[#352f44] rounded-xl p-1 shadow-inner">
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => triggerImageUploadAt()}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-sky-50 dark:bg-[#221e2e] text-sky-600 dark:text-[#4cd7f6] hover:bg-sky-100 dark:hover:bg-[#2c2838] hover:brightness-110 transition-all text-xs font-semibold border border-sky-200 dark:border-[#3a3348] shadow-sm"
-                title="Tải ảnh từ máy và chèn trực tiếp vào vị trí con trỏ"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">add_photo_alternate</span>
-                <span>Chèn ảnh</span>
-              </button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertTable()}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835] transition-all"
+              title="Chèn bảng dữ liệu 3x3"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">table_chart</span>
+            </button>
 
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleInsertImageUrlAt()}
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835] transition-all"
-                title="Chèn ảnh bằng đường dẫn URL"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">image</span>
-              </button>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertLink()}
+              className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isLinkActive ? 'bg-sky-100 dark:bg-[#4cd7f6]/25 text-sky-600 dark:text-[#4cd7f6] border border-sky-300 dark:border-[#4cd7f6]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
+              title="Chèn hoặc chỉnh sửa liên kết URL (Link)"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">link</span>
+            </button>
 
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleInsertVideo()}
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835] transition-all"
-                title="Chèn Video Embed (YouTube / Vimeo)"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">smart_display</span>
-              </button>
-
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleInsertTable()}
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835] transition-all"
-                title="Chèn bảng dữ liệu 3x3"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">table_chart</span>
-              </button>
-
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleInsertLink()}
-                className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isLinkActive ? 'bg-sky-100 dark:bg-[#4cd7f6]/25 text-sky-600 dark:text-[#4cd7f6] border border-sky-300 dark:border-[#4cd7f6]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
-                title="Chèn hoặc chỉnh sửa liên kết URL (Link)"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">link</span>
-              </button>
-
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleInsertDivider()}
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95 transition-all"
-                title="Chèn đường kẻ phân cách ngang (Divider)"
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[17px]">horizontal_rule</span>
-              </button>
-            </div>
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertDivider()}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95 transition-all"
+              title="Chèn đường kẻ phân cách ngang (Divider)"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">horizontal_rule</span>
+            </button>
           </div>
         </div>
       </div>
@@ -2057,7 +2658,18 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
             {/* Document Header & Cover Image Area */}
             <div className="mb-6">
               <div className="mb-4">
-                {coverImage ? (
+                {coverUploadState?.uploading ? (
+                  <div className="relative group rounded-2xl overflow-hidden border border-white/20 bg-black shadow-xl">
+                    <ImageUploadModal
+                      countdown={coverUploadState.countdown}
+                      fileName={coverUploadState.fileName}
+                      statusText={coverUploadState.statusText}
+                      isCover={true}
+                      mediaType="image"
+                      className="min-h-[280px] sm:min-h-[340px]"
+                    />
+                  </div>
+                ) : coverImage ? (
                   <div className="relative group rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/40 bg-slate-100 dark:bg-[#151025] shadow-xl">
                     <OptimizedImage
                       src={coverImage}
@@ -2077,19 +2689,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                       >
                         <span className="material-symbols-outlined text-[16px]">add_photo_alternate</span>
                         <span>Đổi ảnh</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newUrl = prompt('Nhập đường dẫn URL ảnh bìa (.webp, .png, .jpg):', coverImage);
-                          if (newUrl !== null && newUrl.trim()) setCoverImage(newUrl.trim());
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 dark:bg-[#1e1533]/90 text-[#4cd7f6] hover:text-white hover:bg-[#03b5d3] text-xs font-semibold backdrop-blur-md shadow-lg border border-white/10 transition-all active:scale-95"
-                        title="Chèn URL ảnh trực tiếp"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">link</span>
-                        <span>Đổi URL</span>
                       </button>
 
                       <button
@@ -2119,24 +2718,12 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                       </span>
                       <span>+ Thêm ảnh bìa trên tiêu đề</span>
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const url = prompt('Nhập đường dẫn URL ảnh bìa (.webp, .png, .jpg):');
-                        if (url && url.trim()) setCoverImage(url.trim());
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#281e3d] border border-transparent hover:border-sky-500/40 dark:hover:border-[#4cd7f6]/40 transition-all"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">link</span>
-                      <span>Chèn URL ảnh</span>
-                    </button>
                   </div>
                 )}
               </div>
 
               {/* Document Title Input Field */}
-              <div className="pt-2 pb-4">
+              <div className="pt-2 pb-2">
                 <textarea
                   ref={titleTextareaRef}
                   rows={1}
@@ -2152,94 +2739,100 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                 />
               </div>
 
-              {/* SEQUENTIAL VISUAL BLOCKS (True Word-like WYSIWYG) */}
-              <div className="space-y-4">
+              {/* Sapo / Lead Paragraph (Lời dẫn mở đầu liền mạch) */}
+              <div className="mb-6 pt-1">
+                <textarea
+                  rows={1}
+                  value={summary}
+                  onChange={(e) => {
+                    setSummary(e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = `${Math.max(36, e.target.scrollHeight)}px`;
+                  }}
+                  onFocus={() => setFocusedBlockId('doc-sapo')}
+                  className="w-full bg-transparent text-lg sm:text-xl text-slate-500 dark:text-[#a898be] font-medium italic placeholder-slate-400 dark:placeholder-[#8f7eab]/60 outline-none leading-relaxed focus:placeholder:opacity-30 transition-all resize-none overflow-hidden break-words block min-h-[36px]"
+                  placeholder="Nhập đoạn Sapo / tóm tắt mở đầu bài viết..."
+                />
+              </div>
+
+              {/* SEQUENTIAL VISUAL BLOCKS (Unified Seamless Word-like WYSIWYG) */}
+              <div className="min-h-[300px] text-slate-800 dark:text-[#f1eaff]">
                 {blocks.map((block, idx) => (
                   <div key={block.id} className="relative group/block">
                     {/* Render Block: HEADING */}
                     {block.type === 'heading' && (
-                      <div className="flex items-center gap-2 pt-2 p-3 rounded-xl bg-slate-50/80 dark:bg-[#231b36]/40 border border-slate-200 dark:border-[#3c2f57]/50 focus-within:border-sky-500 dark:focus-within:border-[#4cd7f6] transition-colors">
-                        <span className="text-[#ff5167] font-mono text-base font-bold select-none">
-                          {String(idx + 1).padStart(2, '0')}.
-                        </span>
-                        <div className="flex-1">
-                          <RichEditableBlock
-                            inputRef={(el) => (inputRefs.current[block.id] = el)}
-                            html={block.text}
-                            onChange={(val) => updateBlock(block.id, { text: val })}
-                            onFocus={() => {
-                              setFocusedBlockId(block.id);
-                              setSelectedFormat(block.level || 'H2');
-                              updateToolbarActiveStates(block.id);
-                            }}
-                            onSelectionChange={() => updateToolbarActiveStates(block.id)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                insertBlockAt(idx, { id: `p-${Date.now()}`, type: 'paragraph', text: '' });
-                              }
-                            }}
-                            placeholder={`Tiêu đề mục ${block.level || 'H2'}...`}
-                            className={`w-full bg-transparent ${block.level === 'H1' ? 'text-2xl md:text-3xl font-bold' : block.level === 'H3' ? 'text-lg font-semibold' : 'text-xl font-bold'} text-slate-900 dark:text-white font-display pb-1 transition-all ${block.align === 'center' ? 'text-center' : block.align === 'right' ? 'text-right' : 'text-left'}`}
-                            style={{ color: block.color || undefined }}
-                          />
-                        </div>
-                        <button
-                          onClick={() => deleteBlock(block.id)}
-                          className="opacity-0 group-hover/block:opacity-100 p-1 text-slate-400 dark:text-[#ad8888] hover:text-rose-600 dark:hover:text-[#ff5167] transition-all"
-                          title="Xóa đề mục này"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">close</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Render Block: PARAGRAPH (True Unified Word-like WYSIWYG without line splitting) */}
-                    {block.type === 'paragraph' && (
-                      <div className="relative p-3.5 rounded-xl bg-slate-50/60 dark:bg-[#231b36]/40 border border-slate-200 dark:border-[#3c2f57]/50 hover:border-slate-300 dark:hover:border-purple-500/40 focus-within:border-sky-500 dark:focus-within:border-[#4cd7f6] transition-colors">
+                      <div className="relative my-3">
                         <RichEditableBlock
+                          blockId={block.id}
                           inputRef={(el) => (inputRefs.current[block.id] = el)}
                           html={block.text}
                           onChange={(val) => updateBlock(block.id, { text: val })}
                           onFocus={() => {
                             setFocusedBlockId(block.id);
+                            lastActiveIndexRef.current = idx;
+                            setSelectedFormat(block.level || 'H2');
+                            updateToolbarActiveStates(block.id);
+                          }}
+                          onSelectionChange={() => {
+                            lastActiveIndexRef.current = idx;
+                            updateToolbarActiveStates(block.id);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              insertBlockAt(idx, { id: `p-${Date.now()}`, type: 'paragraph', text: '' });
+                            }
+                          }}
+                          placeholder={`Tiêu đề mục ${block.level || 'H2'}...`}
+                          className={`w-full bg-transparent ${block.level === 'H1' ? 'text-2xl sm:text-3xl font-bold' : block.level === 'H3' ? 'text-lg sm:text-xl font-semibold' : 'text-xl sm:text-2xl font-bold'} text-slate-900 dark:text-white font-display pt-2 pb-1 transition-all outline-none ${block.align === 'center' ? 'text-center' : block.align === 'right' ? 'text-right' : 'text-left'}`}
+                          style={{ color: block.color || undefined, lineHeight: block.lineHeight || undefined }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Render Block: PARAGRAPH */}
+                    {block.type === 'paragraph' && (
+                      <div className="relative my-1">
+                        <RichEditableBlock
+                          blockId={block.id}
+                          inputRef={(el) => (inputRefs.current[block.id] = el)}
+                          html={block.text}
+                          onChange={(val) => updateBlock(block.id, { text: val })}
+                          onFocus={() => {
+                            setFocusedBlockId(block.id);
+                            lastActiveIndexRef.current = idx;
                             setSelectedFormat('p');
                             updateToolbarActiveStates(block.id);
                           }}
-                          onSelectionChange={() => updateToolbarActiveStates(block.id)}
-                          placeholder="Nhập nội dung đoạn văn bản tại đây..."
-                          className={`w-full min-h-[44px] bg-transparent text-slate-800 dark:text-[#f1eaff] text-base leading-relaxed font-body font-normal transition-all ${block.align === 'center' ? 'text-center' : block.align === 'right' ? 'text-right' : 'text-left'}`}
-                          style={{ color: block.color || undefined }}
+                          onSelectionChange={() => {
+                            lastActiveIndexRef.current = idx;
+                            updateToolbarActiveStates(block.id);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Backspace' && (!block.text || block.text === '<br>' || block.text === '<p><br></p>') && blocks.length > 1) {
+                              e.preventDefault();
+                              const prevIdx = Math.max(0, idx - 1);
+                              deleteBlock(block.id);
+                              const prevBlock = blocks[prevIdx];
+                              if (prevBlock && inputRefs.current[prevBlock.id]) {
+                                inputRefs.current[prevBlock.id].focus();
+                              }
+                            }
+                          }}
+                          placeholder="Nhập nội dung văn bản..."
+                          className={`w-full min-h-[28px] bg-transparent text-slate-800 dark:text-[#f1eaff] text-base sm:text-lg leading-relaxed font-body font-normal transition-all outline-none py-1 ${block.align === 'center' ? 'text-center' : block.align === 'right' ? 'text-right' : 'text-left'}`}
+                          style={{ color: block.color || undefined, lineHeight: block.lineHeight || undefined }}
                         />
-                        {blocks.length > 1 && (
-                          <button
-                            onClick={() => deleteBlock(block.id)}
-                            className="absolute right-2 top-2 opacity-0 group-hover/block:opacity-100 p-1 text-slate-400 dark:text-[#ad8888] hover:text-rose-600 dark:hover:text-[#ff5167] transition-all"
-                            title="Xóa đoạn này"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">close</span>
-                          </button>
-                        )}
                       </div>
                     )}
 
                     {/* Render Block: LIST */}
                     {block.type === 'list' && (
-                      <div className="my-3 p-4 rounded-xl bg-slate-50 dark:bg-[#221e2a] border border-slate-200 dark:border-[#2c2835] relative">
-                        <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-200 dark:border-[#2c2835] text-xs font-mono text-slate-500 dark:text-[#ad8888]">
-                          <span>{block.listType === 'numbered' ? '🔢 Danh sách số' : '• Danh sách gạch đầu dòng'}</span>
-                          <button
-                            onClick={() => deleteBlock(block.id)}
-                            className="text-slate-400 dark:text-[#ad8888] hover:text-rose-600 dark:hover:text-[#ff5167]"
-                            title="Xóa danh sách"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">close</span>
-                          </button>
-                        </div>
-                        <div className="space-y-2">
+                      <div className="my-3 pl-3 relative group/list">
+                        <div className="space-y-1.5">
                           {(block.items || []).map((item, itemIdx) => (
                             <div key={itemIdx} className="flex items-center gap-2">
-                              <span className="text-[#ff5167] font-mono text-xs select-none">
+                              <span className="text-[#ff5167] font-mono text-sm select-none font-bold">
                                 {block.listType === 'numbered' ? `${itemIdx + 1}.` : '•'}
                               </span>
                               <input
@@ -2249,7 +2842,19 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                                   newItems[itemIdx] = e.target.value;
                                   updateBlock(block.id, { items: newItems });
                                 }}
-                                className="w-full bg-transparent text-sm text-slate-800 dark:text-[#e8dff1] outline-none border-b border-slate-200 dark:border-white/5 focus:border-sky-500 dark:focus:border-[#4cd7f6] pb-0.5"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    const newItems = [...block.items];
+                                    newItems.splice(itemIdx + 1, 0, '');
+                                    updateBlock(block.id, { items: newItems });
+                                  } else if (e.key === 'Backspace' && !item && block.items.length > 1) {
+                                    e.preventDefault();
+                                    const newItems = block.items.filter((_, i) => i !== itemIdx);
+                                    updateBlock(block.id, { items: newItems });
+                                  }
+                                }}
+                                className="w-full bg-transparent text-base text-slate-800 dark:text-[#e8dff1] outline-none"
                                 placeholder="Nhập mục danh sách..."
                               />
                               <button
@@ -2257,26 +2862,26 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                                   const newItems = block.items.filter((_, i) => i !== itemIdx);
                                   updateBlock(block.id, { items: newItems.length > 0 ? newItems : [''] });
                                 }}
-                                className="text-slate-400 dark:text-[#ad8888] hover:text-rose-600 dark:hover:text-[#ff5167] p-0.5"
+                                className="opacity-0 group-hover/list:opacity-100 text-slate-400 hover:text-rose-600 p-0.5 transition-opacity"
                               >
-                                <span className="material-symbols-outlined text-[14px]">remove_circle_outline</span>
+                                <span className="material-symbols-outlined text-[14px]">close</span>
                               </button>
                             </div>
                           ))}
-                          <button
-                            onClick={() => updateBlock(block.id, { items: [...(block.items || []), ''] })}
-                            className="text-xs text-sky-600 dark:text-[#4cd7f6] hover:underline pt-1 flex items-center gap-1 font-semibold"
-                          >
-                            <span className="material-symbols-outlined text-[14px]">add</span>
-                            <span>Thêm mục</span>
-                          </button>
                         </div>
+                        <button
+                          onClick={() => updateBlock(block.id, { items: [...(block.items || []), ''] })}
+                          className="text-xs text-sky-600 dark:text-[#4cd7f6] hover:underline pt-1 flex items-center gap-1 font-semibold"
+                        >
+                          <span className="material-symbols-outlined text-[14px]">add</span>
+                          <span>Thêm dòng</span>
+                        </button>
                       </div>
                     )}
 
                     {/* Render Block: TABLE */}
                     {block.type === 'table' && (
-                      <div className="my-4 rounded-xl overflow-hidden bg-slate-50 dark:bg-[#221e2a] border border-slate-200 dark:border-[#2c2835] relative">
+                      <div className="my-5 rounded-2xl overflow-hidden bg-slate-50 dark:bg-[#221e2a] border border-slate-200 dark:border-[#2c2835] relative group/tbl shadow-sm">
                         <div className="p-2 bg-slate-100 dark:bg-[#1b1724] flex items-center justify-between border-b border-slate-200 dark:border-[#2c2835] text-xs font-mono text-sky-600 dark:text-[#4cd7f6]">
                           <span>Bảng dữ liệu</span>
                           <button
@@ -2343,33 +2948,54 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
                     {/* Render Block: VIDEO */}
                     {block.type === 'video' && (
-                      <div className="my-4 rounded-xl bg-slate-50 dark:bg-[#221e2a] p-3 border border-slate-200 dark:border-[#2c2835] relative">
-                        <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-200 dark:border-[#2c2835] text-xs font-mono text-sky-600 dark:text-[#4cd7f6]">
-                          <span>🎬 Video Embed</span>
-                          <button
-                            onClick={() => deleteBlock(block.id)}
-                            className="text-slate-400 dark:text-[#ad8888] hover:text-rose-600 dark:hover:text-[#ff5167]"
-                            title="Xóa video"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">close</span>
-                          </button>
-                        </div>
-                        <div className="relative aspect-video rounded-lg overflow-hidden bg-black mb-2 shadow-md">
-                          <iframe
-                            src={formatVideoEmbedUrl(block.url)}
-                            title="Video Player"
-                            className="w-full h-full border-0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                            allowFullScreen
+                      block.uploading ? (
+                        <div className="my-6 max-w-3xl mx-auto">
+                          <ImageUploadModal
+                            countdown={block.countdown}
+                            fileName={block.fileName || block.caption}
+                            statusText={block.statusText}
+                            mediaType="video"
+                            className="aspect-video"
                           />
                         </div>
-                        <input
-                          value={block.caption || ''}
-                          onChange={(e) => updateBlock(block.id, { caption: e.target.value })}
-                          className="w-full text-center bg-transparent text-xs text-slate-500 dark:text-[#ad8888] italic outline-none"
-                          placeholder="Chú thích video..."
-                        />
-                      </div>
+                      ) : (
+                        <div className="my-6 max-w-3xl mx-auto relative group/vid">
+                          <div className="relative aspect-video rounded-2xl overflow-hidden bg-black shadow-lg border border-slate-200 dark:border-white/10 flex items-center justify-center">
+                            {block.url?.startsWith('blob:') || block.url?.startsWith('data:') || block.url?.includes('/video/upload/') || block.url?.includes('.mp4') || block.url?.includes('.webm') ? (
+                              <video
+                                src={block.url}
+                                controls
+                                playsInline
+                                preload="metadata"
+                                className="w-full h-full object-contain"
+                              />
+                            ) : (
+                              <iframe
+                                src={formatVideoEmbedUrl(block.url)}
+                                title="Video Player"
+                                className="w-full h-full border-0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                allowFullScreen
+                              />
+                            )}
+                            <button
+                              onClick={() => deleteBlock(block.id)}
+                              className="absolute top-3 right-3 opacity-0 group-hover/vid:opacity-100 p-1.5 rounded-xl bg-slate-900/80 text-rose-400 hover:bg-rose-600 hover:text-white backdrop-blur-md shadow-md transition-all active:scale-95 z-10"
+                              title="Xóa video"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">delete</span>
+                            </button>
+                          </div>
+                          <div className="mt-2 text-center">
+                            <input
+                              value={block.caption || ''}
+                              onChange={(e) => updateBlock(block.id, { caption: e.target.value })}
+                              className="w-full text-center bg-transparent text-xs text-slate-500 dark:text-[#a898be] italic outline-none hover:text-slate-700 dark:hover:text-[#e8dff1] focus:text-sky-600 dark:focus:text-[#4cd7f6] transition-colors"
+                              placeholder="Chú thích video..."
+                            />
+                          </div>
+                        </div>
+                      )
                     )}
 
                     {/* Render Block: DIVIDER */}
@@ -2392,66 +3018,78 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
                     {/* Render Block: IN-LINE VISUAL IMAGE */}
                     {block.type === 'image' && (
-                      <div className="my-4 rounded-2xl bg-slate-50 dark:bg-[#221e2a] p-2 shadow-md dark:shadow-2xl border border-slate-200 dark:border-[#2c2835] relative group/img">
-                        <div className="absolute top-4 right-4 z-10 flex items-center gap-1 bg-white/90 dark:bg-[#100c18]/90 backdrop-blur-md px-2 py-1 rounded-xl shadow-md border border-slate-200 dark:border-white/10 opacity-90 group-hover/img:opacity-100 transition-opacity">
-                          <span className="text-[10px] font-mono text-sky-600 dark:text-[#4cd7f6] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-[#2c2835]">
-                            .webp
-                          </span>
-                          <button
-                            onClick={() => deleteBlock(block.id)}
-                            className="p-1 rounded text-slate-400 dark:text-[#ad8888] hover:text-rose-600 dark:hover:text-[#ff5167] hover:bg-slate-100 dark:hover:bg-[#2c2835] transition-colors"
-                            title="Xóa ảnh này"
-                          >
-                            <span className="material-symbols-outlined text-[18px]">delete</span>
-                          </button>
-                        </div>
-
-                        <div className="relative overflow-hidden rounded-xl bg-slate-100 dark:bg-[#100c18]">
-                          <OptimizedImage
-                            src={block.url}
-                            alt={block.caption || 'Ảnh minh họa WebP'}
-                            sizes="(max-width: 768px) 100vw, 1000px"
-                            containerClassName="w-full max-h-[420px]"
-                            className="w-full max-h-[420px] object-cover rounded-xl shadow-md transition-transform duration-500 hover:scale-[1.01]"
+                      block.uploading ? (
+                        <div className="my-5 max-w-3xl mx-auto">
+                          <ImageUploadModal
+                            countdown={block.countdown}
+                            fileName={block.fileName || block.caption}
+                            statusText={block.statusText}
+                            mediaType="image"
+                            className="min-h-[240px] sm:min-h-[280px]"
                           />
                         </div>
+                      ) : (
+                        <div className="my-5 max-w-3xl mx-auto relative group/img">
+                          <div className="relative overflow-hidden rounded-2xl bg-slate-100 dark:bg-[#100c18] shadow-md border border-slate-200 dark:border-white/10">
+                            <OptimizedImage
+                              src={block.url}
+                              alt={block.caption || 'Ảnh minh họa WebP'}
+                              sizes="(max-width: 768px) 100vw, 1000px"
+                              containerClassName="w-full max-h-[440px]"
+                              className="w-full max-h-[440px] object-cover rounded-2xl block mx-auto transition-transform duration-500 hover:scale-[1.005]"
+                            />
+                            <button
+                              onClick={() => deleteBlock(block.id)}
+                              className="absolute top-3 right-3 opacity-0 group-hover/img:opacity-100 p-1.5 rounded-xl bg-slate-900/80 text-rose-400 hover:bg-rose-600 hover:text-white backdrop-blur-md shadow-md transition-all active:scale-95 z-10"
+                              title="Xóa ảnh"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">delete</span>
+                            </button>
+                          </div>
 
-                        <div className="mt-2 px-2 text-center">
-                          <input
-                            value={block.caption}
-                            onChange={(e) => updateBlock(block.id, { caption: e.target.value })}
-                            className="w-full text-center bg-transparent text-xs text-slate-500 dark:text-[#ad8888] italic outline-none hover:text-slate-800 dark:hover:text-[#e8dff1] focus:text-sky-600 dark:focus:text-[#4cd7f6] transition-colors"
-                            placeholder="Nhập chú thích ảnh (.webp)..."
-                          />
+                          <div className="mt-2 text-center">
+                            <input
+                              value={block.caption || ''}
+                              onChange={(e) => updateBlock(block.id, { caption: e.target.value })}
+                              className="w-full text-center bg-transparent text-xs text-slate-500 dark:text-[#a898be] italic outline-none hover:text-slate-700 dark:hover:text-[#e8dff1] focus:text-sky-600 dark:focus:text-[#4cd7f6] transition-colors"
+                              placeholder="Nhập chú thích ảnh (.webp)..."
+                            />
+                          </div>
                         </div>
-                      </div>
+                      )
                     )}
 
                     {/* Render Block: QUOTE */}
                     {block.type === 'quote' && (
-                      <div className="my-4 pl-5 py-3 bg-rose-50/50 dark:bg-[#161127] border-l-4 border-[#ff5167] rounded-r-xl relative">
+                      <div className="my-5 pl-5 py-2.5 bg-slate-50/60 dark:bg-[#161127] border-l-4 border-[#ff5167] rounded-r-xl relative group/quote">
                         <RichEditableBlock
+                          blockId={block.id}
                           inputRef={(el) => (inputRefs.current[block.id] = el)}
                           html={block.text}
                           onChange={(val) => updateBlock(block.id, { text: val })}
                           onFocus={() => {
                             setFocusedBlockId(block.id);
+                            lastActiveIndexRef.current = idx;
                             setSelectedFormat('quote');
                             updateToolbarActiveStates(block.id);
                           }}
-                          onSelectionChange={() => updateToolbarActiveStates(block.id)}
+                          onSelectionChange={() => {
+                            lastActiveIndexRef.current = idx;
+                            updateToolbarActiveStates(block.id);
+                          }}
                           placeholder="Nội dung trích dẫn quan trọng..."
-                          className="w-full bg-transparent text-base italic text-slate-800 dark:text-[#e8dff1] min-h-[44px]"
+                          className="w-full bg-transparent text-base sm:text-lg italic text-slate-800 dark:text-[#e8dff1] min-h-[36px] outline-none"
+                          style={{ color: block.color || undefined, lineHeight: block.lineHeight || undefined }}
                         />
                         <input
                           value={block.author || ''}
                           onChange={(e) => updateBlock(block.id, { author: e.target.value })}
-                          className="w-full bg-transparent text-xs text-rose-600 dark:text-[#ffb3b5] placeholder-slate-400 dark:placeholder-[#ad8888]/40 outline-none mt-1 font-semibold"
+                          className="w-full bg-transparent text-xs text-[#ff5167] placeholder-slate-400 dark:placeholder-[#ad8888]/50 outline-none mt-1 font-semibold"
                           placeholder="— Tác giả trích dẫn"
                         />
                         <button
                           onClick={() => deleteBlock(block.id)}
-                          className="absolute right-2 top-2 opacity-0 group-hover/block:opacity-100 p-1 text-slate-400 dark:text-[#ad8888] hover:text-rose-600 dark:hover:text-[#ff5167] transition-all"
+                          className="absolute right-2 top-2 opacity-0 group-hover/quote:opacity-100 p-1 text-slate-400 hover:text-rose-600 transition-all"
                           title="Xóa trích dẫn"
                         >
                           <span className="material-symbols-outlined text-[16px]">close</span>
@@ -2567,7 +3205,18 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
               </button>
             </div>
 
-            {coverImage ? (
+            {coverUploadState?.uploading ? (
+              <div className="rounded-xl overflow-hidden bg-black border border-white/20 shadow-md">
+                <ImageUploadModal
+                  countdown={coverUploadState.countdown}
+                  fileName={coverUploadState.fileName}
+                  statusText={coverUploadState.statusText}
+                  isCover={true}
+                  mediaType="image"
+                  className="min-h-[160px] p-3 text-xs"
+                />
+              </div>
+            ) : coverImage ? (
               <div className="relative group rounded-xl overflow-hidden bg-slate-100 dark:bg-[#100c18] shadow-md border border-slate-200 dark:border-[#2c2835]">
                 <OptimizedImage
                   src={coverImage}
@@ -2805,6 +3454,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
           </div>
         </aside>
       </div>
+
+      {/* Custom Universal Prompt Modal */}
+      <PromptModal {...promptModal} onCancel={closePrompt} />
     </div>
   );
 }

@@ -42,6 +42,7 @@ const PostSchema = new mongoose.Schema({
   subCategory: { type: String, default: 'Kiến trúc Dữ liệu & e-ID' },
   tag: { type: String, default: 'TIN TỨC' },
   summary: { type: String, default: '' },
+  sapo: { type: String, default: '' },
   coverImage: { type: String, default: '' },
   content: { type: [ContentSectionSchema], default: [] },
   blocks: { type: [BlockSchema], default: [] },

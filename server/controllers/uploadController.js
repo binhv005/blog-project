@@ -30,9 +30,35 @@ export const uploadImage = async (req, res) => {
     });
   } catch (error) {
     console.error('[Cloudinary Upload Error]', error);
-    res.status(500).json({ success: false, message: error.message || 'Lỗi tải ảnh lên Cloudinary' });
+// POST /api/upload/video - Upload single video (base64, data URI, or remote URL) to Cloudinary
+export const uploadVideo = async (req, res) => {
+  try {
+    const { video, folder = 'dudi_blog/videos' } = req.body;
+
+    if (!video) {
+      return res.status(400).json({ success: false, message: 'Dữ liệu video không được để trống' });
+    }
+
+    const uploadResponse = await cloudinary.uploader.upload(video, {
+      folder,
+      resource_type: 'video'
+    });
+
+    res.json({
+      success: true,
+      url: uploadResponse.secure_url,
+      public_id: uploadResponse.public_id,
+      format: uploadResponse.format,
+      duration: uploadResponse.duration,
+      width: uploadResponse.width,
+      height: uploadResponse.height
+    });
+  } catch (error) {
+    console.error('[Cloudinary Video Upload Error]', error);
+    res.status(500).json({ success: false, message: error.message || 'Lỗi tải video lên Cloudinary' });
   }
 };
+
 
 // POST /api/upload/sync-all - Migrate & sync all post images in MongoDB to Cloudinary
 export const syncAllImages = async (req, res) => {
