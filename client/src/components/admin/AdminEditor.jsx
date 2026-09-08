@@ -435,7 +435,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         if (/<div align=/i.test(text)) {
           text = cleanAlignTags(text);
         }
-        return { ...b, text: cleanPastedHtml(mdToHtml(text)) };
+        return { ...b, text: mdToHtml(text) };
       });
     }
     if (postToEdit?.content && Array.isArray(postToEdit.content)) {
@@ -493,6 +493,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   const [isUnderlineActive, setIsUnderlineActive] = useState(false);
   const [isStrikethroughActive, setIsStrikethroughActive] = useState(false);
   const [selectedFontSize, setSelectedFontSize] = useState('16');
+  const [selectedTextColor, setSelectedTextColor] = useState(null);
   const [textAlign, setTextAlign] = useState('left'); // 'left' | 'center' | 'right'
   const [isBulletListActive, setIsBulletListActive] = useState(false);
   const [isNumberedListActive, setIsNumberedListActive] = useState(false);
@@ -503,10 +504,13 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   // Custom Toolbar Dropdowns State (prevents losing text selection on click)
   const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false);
   const [isFontSizeDropdownOpen, setIsFontSizeDropdownOpen] = useState(false);
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+  const [customColorHex, setCustomColorHex] = useState('#ff5167');
   const [selectedLineHeight, setSelectedLineHeight] = useState('1.6');
   const [isLineHeightDropdownOpen, setIsLineHeightDropdownOpen] = useState(false);
   const formatDropdownRef = useRef(null);
   const fontSizeDropdownRef = useRef(null);
+  const colorPickerRef = useRef(null);
   const lineHeightDropdownRef = useRef(null);
 
   useEffect(() => {
@@ -516,6 +520,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       }
       if (fontSizeDropdownRef.current && !fontSizeDropdownRef.current.contains(e.target)) {
         setIsFontSizeDropdownOpen(false);
+      }
+      if (colorPickerRef.current && !colorPickerRef.current.contains(e.target)) {
+        setIsColorPickerOpen(false);
       }
       if (lineHeightDropdownRef.current && !lineHeightDropdownRef.current.contains(e.target)) {
         setIsLineHeightDropdownOpen(false);
@@ -555,17 +562,17 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       const italic = document.queryCommandState('italic');
       const underline = document.queryCommandState('underline');
       const strike = document.queryCommandState('strikeThrough');
-      const color = document.queryCommandValue('foreColor');
 
       setIsBoldActive(bold);
       setIsItalicActive(italic);
       setIsUnderlineActive(underline);
       setIsStrikethroughActive(strike);
 
-      // Check font size, alignment, link & heading format of current selection / caret
+      // Check font size, color, alignment, link & heading format of current selection / caret
       const selection = window.getSelection();
       let currentAlign = 'left';
       let detectedFormat = null;
+      let detectedColor = null;
       let isLink = false;
 
       if (selection && selection.rangeCount > 0) {
@@ -607,6 +614,14 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
             }
           }
 
+          if (!detectedColor) {
+            if (node.style && node.style.color) {
+              detectedColor = node.style.color;
+            } else if (node.tagName?.toLowerCase() === 'font' && node.getAttribute('color')) {
+              detectedColor = node.getAttribute('color');
+            }
+          }
+
           const tag = node.tagName?.toLowerCase();
           if (tag === 'a') {
             isLink = true;
@@ -630,6 +645,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         }
       }
 
+      setSelectedTextColor(detectedColor || null);
       setIsBulletListActive(document.queryCommandState('insertUnorderedList'));
       setIsNumberedListActive(document.queryCommandState('insertOrderedList'));
       setIsQuoteActive(detectedFormat === 'quote');
@@ -991,6 +1007,110 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     const current = parseInt(selectedFontSize, 10) || 16;
     const prev = [...FONT_SIZES].reverse().find((s) => s < current) || Math.max(9, current - 2);
     applyFontSize(prev);
+  };
+
+  const COLOR_PALETTE = [
+    { name: 'Trắng', value: '#ffffff' },
+    { name: 'Đen', value: '#0f172a' },
+    { name: 'Xám', value: '#94a3b8' },
+    { name: 'Đỏ', value: '#ef4444' },
+    { name: 'Hồng Neon (Brand)', value: '#ff5167' },
+    { name: 'Cam rực rỡ', value: '#f97316' },
+    { name: 'Hổ phách', value: '#f59e0b' },
+    { name: 'Vàng sáng', value: '#eab308' },
+    { name: 'Xanh lá chuối', value: '#84cc16' },
+    { name: 'Xanh ngọc lục', value: '#10b981' },
+    { name: 'Xanh ngọc Teal', value: '#14b8a6' },
+    { name: 'Cyan Neon (Brand)', value: '#4cd7f6' },
+    { name: 'Xanh da trời', value: '#0ea5e9' },
+    { name: 'Xanh dương đậm', value: '#3b82f6' },
+    { name: 'Chàm Indigo', value: '#6366f1' },
+    { name: 'Tím Violet', value: '#8b5cf6' },
+    { name: 'Tím Fuchsia', value: '#d946ef' },
+    { name: 'Hồng Rose', value: '#f43f5e' },
+  ];
+
+  const applyTextColor = (color) => {
+    let selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      if (savedSelectionRef.current) {
+        restoreSelection();
+        selection = window.getSelection();
+      }
+    }
+
+    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+      const range = selection.getRangeAt(0);
+
+      if (!color || color === 'default') {
+        try {
+          const extracted = range.extractContents();
+          if (extracted.querySelectorAll) {
+            const innerSpans = extracted.querySelectorAll('span[style*="color"], font[color]');
+            innerSpans.forEach((s) => {
+              s.style.color = '';
+              s.removeAttribute('color');
+              if (!s.getAttribute('style') || s.getAttribute('style').trim() === '') {
+                while (s.firstChild) {
+                  s.parentNode.insertBefore(s.firstChild, s);
+                }
+                s.parentNode.removeChild(s);
+              }
+            });
+          }
+          const span = document.createElement('span');
+          span.style.color = 'inherit';
+          span.appendChild(extracted);
+          range.insertNode(span);
+
+          const newRange = document.createRange();
+          newRange.selectNodeContents(span);
+          selection.removeAllRanges();
+          selection.addRange(newRange);
+          savedSelectionRef.current = newRange.cloneRange();
+        } catch (_) {
+          document.execCommand('foreColor', false, 'inherit');
+        }
+        setSelectedTextColor(null);
+      } else {
+        const span = document.createElement('span');
+        span.style.color = color;
+
+        try {
+          const extracted = range.extractContents();
+          if (extracted.querySelectorAll) {
+            const innerSpans = extracted.querySelectorAll('span[style*="color"], font[color]');
+            innerSpans.forEach((s) => {
+              s.style.color = '';
+              s.removeAttribute('color');
+              if (!s.getAttribute('style') || s.getAttribute('style').trim() === '') {
+                while (s.firstChild) {
+                  s.parentNode.insertBefore(s.firstChild, s);
+                }
+                s.parentNode.removeChild(s);
+              }
+            });
+          }
+          span.appendChild(extracted);
+          range.insertNode(span);
+
+          const newRange = document.createRange();
+          newRange.selectNodeContents(span);
+          selection.removeAllRanges();
+          selection.addRange(newRange);
+          savedSelectionRef.current = newRange.cloneRange();
+        } catch (_) {
+          document.execCommand('foreColor', false, color);
+        }
+        setSelectedTextColor(color);
+      }
+
+      updateToolbarActiveStates();
+      const updated = syncActiveBlockContent();
+      pushHistory(updated);
+    } else {
+      toast.info('Vui lòng bôi đen (tô đen) đoạn chữ cần đổi màu chữ');
+    }
   };
 
   const LINE_HEIGHT_OPTIONS = [
@@ -2290,6 +2410,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                 onClick={() => {
                   setIsFormatDropdownOpen((prev) => !prev);
                   setIsFontSizeDropdownOpen(false);
+                  setIsColorPickerOpen(false);
                   setIsLineHeightDropdownOpen(false);
                 }}
                 className="flex items-center justify-between gap-1 hover:bg-slate-100 dark:hover:bg-[#2c2835]/60 text-slate-800 dark:text-[#e8dff1] text-xs font-semibold pl-2 pr-1 py-1 rounded-lg outline-none cursor-pointer transition-colors"
@@ -2399,6 +2520,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                 onClick={() => {
                   setIsFontSizeDropdownOpen((prev) => !prev);
                   setIsFormatDropdownOpen(false);
+                  setIsColorPickerOpen(false);
                   setIsLineHeightDropdownOpen(false);
                 }}
                 className="flex items-center justify-between gap-0.5 bg-slate-100 hover:bg-slate-200/80 dark:bg-[#251d36] dark:hover:bg-[#352b48] text-slate-800 dark:text-[#e8dff1] text-xs font-bold px-1.5 py-1 rounded-lg border border-slate-200 dark:border-[#3d3353] outline-none cursor-pointer transition-colors min-w-[46px]"
@@ -2435,6 +2557,127 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                       )}
                     </button>
                   ))}
+                </div>
+              )}
+            </div>
+
+            <div className="h-4 w-px bg-slate-300 dark:bg-[#352f44] mx-0.5"></div>
+
+            {/* Text Color Picker (Only applies to highlighted/selected text) */}
+            <div className="relative inline-flex items-center" ref={colorPickerRef}>
+              <button
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={() => {
+                  setIsColorPickerOpen((prev) => !prev);
+                  setIsFormatDropdownOpen(false);
+                  setIsFontSizeDropdownOpen(false);
+                  setIsLineHeightDropdownOpen(false);
+                }}
+                className={`w-7 h-7 flex flex-col items-center justify-center rounded-lg active:scale-95 transition-all ${isColorPickerOpen || selectedTextColor
+                  ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm'
+                  : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'
+                  }`}
+                title="Màu chữ (Chỉ áp dụng cho phần chữ được bôi đen)"
+              >
+                <span className="font-bold text-[12px] leading-tight font-serif">A</span>
+                <span
+                  className="w-3.5 h-[3px] rounded-full mt-0.5 transition-colors"
+                  style={{ backgroundColor: selectedTextColor || '#ff5167' }}
+                />
+              </button>
+
+              {isColorPickerOpen && (
+                <div
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  className="absolute top-full mt-1.5 left-0 z-50 bg-white dark:bg-[#1e1a26] border border-slate-200 dark:border-[#3d3353] rounded-2xl shadow-2xl p-3 w-64 backdrop-blur-xl"
+                >
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-[#2d253d]">
+                    <span className="text-xs font-bold text-slate-700 dark:text-[#e8dff1] flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[16px] text-[#ff5167]">format_color_text</span>
+                      Màu chữ
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        applyTextColor('default');
+                        setIsColorPickerOpen(false);
+                      }}
+                      className="text-[10px] text-slate-500 dark:text-[#a090b8] hover:text-rose-500 dark:hover:text-[#ff5167] font-semibold hover:underline cursor-pointer"
+                    >
+                      Mặc định
+                    </button>
+                  </div>
+
+                  {/* Preset Colors Grid */}
+                  <div className="grid grid-cols-6 gap-1.5 mb-3">
+                    {COLOR_PALETTE.map((c) => (
+                      <button
+                        key={c.value}
+                        type="button"
+                        onClick={() => {
+                          applyTextColor(c.value);
+                          setIsColorPickerOpen(false);
+                        }}
+                        title={c.name}
+                        className="w-7 h-7 rounded-lg border border-black/10 dark:border-white/15 flex items-center justify-center transition-transform hover:scale-110 active:scale-95 shadow-sm relative cursor-pointer"
+                        style={{ backgroundColor: c.value }}
+                      >
+                        {selectedTextColor?.toLowerCase() === c.value.toLowerCase() && (
+                          <span className={`material-symbols-outlined text-[13px] ${c.value === '#ffffff' || c.value === '#f59e0b' || c.value === '#eab308' || c.value === '#4cd7f6' || c.value === '#84cc16' ? 'text-black' : 'text-white'}`}>
+                            check
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom Color Input */}
+                  <div className="pt-2 border-t border-slate-100 dark:border-[#2d253d]">
+                    <div className="text-[10px] font-semibold text-slate-400 dark:text-[#8f7eab] mb-1.5 uppercase tracking-wider">
+                      Màu tùy chọn
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={customColorHex}
+                        onChange={(e) => {
+                          setCustomColorHex(e.target.value);
+                          applyTextColor(e.target.value);
+                        }}
+                        className="w-7 h-7 rounded-lg cursor-pointer border-0 p-0 bg-transparent flex-shrink-0"
+                      />
+                      <input
+                        type="text"
+                        value={customColorHex}
+                        onChange={(e) => setCustomColorHex(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            applyTextColor(customColorHex);
+                            setIsColorPickerOpen(false);
+                          }
+                        }}
+                        placeholder="#ff5167"
+                        className="flex-1 min-w-0 px-2 py-1 text-xs rounded-lg bg-slate-100 dark:bg-[#251d36] border border-slate-200 dark:border-[#3d3353] text-slate-800 dark:text-white font-mono outline-none focus:border-[#ff5167]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          applyTextColor(customColorHex);
+                          setIsColorPickerOpen(false);
+                        }}
+                        className="px-2 py-1 text-[11px] font-semibold bg-[#ff5167] text-white rounded-lg hover:bg-[#ff3852] active:scale-95 transition-all shadow-sm shadow-[#ff5167]/20 flex-shrink-0 cursor-pointer"
+                      >
+                        Áp dụng
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -2484,6 +2727,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                   setIsLineHeightDropdownOpen((prev) => !prev);
                   setIsFormatDropdownOpen(false);
                   setIsFontSizeDropdownOpen(false);
+                  setIsColorPickerOpen(false);
                 }}
                 className={`h-7 flex items-center gap-0.5 px-1 rounded-lg active:scale-95 transition-all ${isLineHeightDropdownOpen
                   ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm font-bold'
