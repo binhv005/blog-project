@@ -2756,7 +2756,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                   inputRef={(el) => {
                     inputRefs.current['doc-sapo'] = el;
                   }}
-                  className="w-full bg-transparent text-lg sm:text-xl text-slate-500 dark:text-[#a898be] font-medium italic outline-none leading-relaxed transition-all break-words min-h-[40px] py-1.5 overflow-visible"
+                  className="w-full bg-transparent text-[12px] text-slate-500 dark:text-[#a898be] font-medium italic outline-none leading-relaxed transition-all break-words min-h-[32px] py-1 overflow-visible"
                 />
               </div>
 

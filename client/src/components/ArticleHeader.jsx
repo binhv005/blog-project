@@ -49,7 +49,7 @@ export default function ArticleHeader() {
         }
         return (
           <p 
-            className="text-base sm:text-lg lg:text-xl font-medium text-slate-500 dark:text-[#a898be] italic leading-relaxed my-4"
+            className="text-[12px] font-medium text-slate-500 dark:text-[#a898be] italic leading-relaxed my-3"
             dangerouslySetInnerHTML={{ __html: rawSapo }}
           />
         );
