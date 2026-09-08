@@ -371,14 +371,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
   // Document State
   const [title, setTitle] = useState(postToEdit?.title || '');
-
-  // Auto-resize title textarea to avoid truncation of long titles
-  useEffect(() => {
-    if (titleTextareaRef.current) {
-      titleTextareaRef.current.style.height = 'auto';
-      titleTextareaRef.current.style.height = `${Math.max(48, titleTextareaRef.current.scrollHeight)}px`;
-    }
-  }, [title]);
   const [summary, setSummary] = useState(postToEdit?.summary || '');
   const [category, setCategory] = useState(postToEdit?.category || 'Công nghệ & Kiến trúc phần mềm');
   const [authorName, setAuthorName] = useState(postToEdit?.author?.name || 'Alex Vũ (Super Admin)');
@@ -2055,10 +2047,10 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
     const postData = {
       title,
-      slug: slug || title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w\s-]/g, '').replace(/\s+/g, '-'),
+      slug: slug || cleanTitle.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w\s-]/g, '').replace(/\s+/g, '-'),
       category,
-      summary: summary || 'Tóm tắt bài viết...',
-      sapo: summary || 'Tóm tắt bài viết...',
+      summary: summary || '',
+      sapo: summary || '',
       blocks,
       coverImage: coverImage || firstImgBlock?.url || 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80&fm=webp',
       tags: tags.length > 0 ? tags : ['#DUDISoftware', '#TechNews'],
@@ -2133,8 +2125,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       category,
       subCategory: category,
       tag: (category || 'TIN TỨC').toUpperCase(),
-      summary: summary || 'Tóm tắt bài viết xem trước...',
-      sapo: summary || 'Tóm tắt bài viết xem trước...',
+      summary: summary || '',
+      sapo: summary || '',
       blocks,
       coverImage: coverImage || firstImgBlock?.url || 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80&fm=webp',
       tags: tags.length > 0 ? tags : ['#DUDISoftware', '#Preview'],
@@ -2337,8 +2329,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                         setIsFormatDropdownOpen(false);
                       }}
                       className={`w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors ${selectedFormat === fmt.value
-                          ? 'bg-[#ff5167]/15 text-[#ff5167] font-bold'
-                          : 'text-slate-700 dark:text-[#e8dff1] hover:bg-slate-100 dark:hover:bg-[#2c2835]'
+                        ? 'bg-[#ff5167]/15 text-[#ff5167] font-bold'
+                        : 'text-slate-700 dark:text-[#e8dff1] hover:bg-slate-100 dark:hover:bg-[#2c2835]'
                         }`}
                     >
                       <span>{fmt.label}</span>
@@ -2433,11 +2425,11 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                         setIsFontSizeDropdownOpen(false);
                       }}
                       className={`w-full flex items-center justify-between px-3 py-1 text-xs text-left transition-colors ${String(selectedFontSize) === String(sz)
-                          ? 'bg-[#ff5167]/15 text-[#ff5167] font-bold'
-                          : 'text-slate-700 dark:text-[#e8dff1] hover:bg-slate-100 dark:hover:bg-[#2c2835]'
+                        ? 'bg-[#ff5167]/15 text-[#ff5167] font-bold'
+                        : 'text-slate-700 dark:text-[#e8dff1] hover:bg-slate-100 dark:hover:bg-[#2c2835]'
                         }`}
                     >
-                      <span>{sz}px</span>
+                      <span>{sz}</span>
                       {String(selectedFontSize) === String(sz) && (
                         <span className="material-symbols-outlined text-[14px] text-[#ff5167]">check</span>
                       )}
@@ -2494,8 +2486,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                   setIsFontSizeDropdownOpen(false);
                 }}
                 className={`h-7 flex items-center gap-0.5 px-1 rounded-lg active:scale-95 transition-all ${isLineHeightDropdownOpen
-                    ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm font-bold'
-                    : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'
+                  ? 'bg-[#ff5167]/25 text-[#ff5167] border border-[#ff5167]/40 shadow-sm font-bold'
+                  : 'text-slate-600 dark:text-[#ad8888] hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#2c2835]'
                   }`}
                 title="Giãn cách dòng (Line Spacing)"
               >
@@ -2521,8 +2513,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                         setIsLineHeightDropdownOpen(false);
                       }}
                       className={`w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors ${String(selectedLineHeight) === String(opt.value)
-                          ? 'bg-[#ff5167]/15 text-[#ff5167] font-bold'
-                          : 'text-slate-700 dark:text-[#e8dff1] hover:bg-slate-100 dark:hover:bg-[#2c2835]'
+                        ? 'bg-[#ff5167]/15 text-[#ff5167] font-bold'
+                        : 'text-slate-700 dark:text-[#e8dff1] hover:bg-slate-100 dark:hover:bg-[#2c2835]'
                         }`}
                     >
                       <span>{opt.label}</span>
@@ -2723,35 +2715,48 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
               </div>
 
               {/* Document Title Input Field */}
-              <div className="pt-2 pb-2">
-                <textarea
-                  ref={titleTextareaRef}
-                  rows={1}
-                  value={title}
-                  onChange={(e) => {
-                    setTitle(e.target.value);
-                    e.target.style.height = 'auto';
-                    e.target.style.height = `${Math.max(48, e.target.scrollHeight)}px`;
-                  }}
-                  onFocus={() => setFocusedBlockId('doc-title')}
-                  className="w-full bg-transparent text-2xl md:text-3xl lg:text-4xl text-slate-900 dark:text-white font-display font-bold placeholder-slate-400 dark:placeholder-[#9e8eb3] outline-none leading-snug tracking-tight focus:placeholder:opacity-30 transition-all text-left resize-none overflow-hidden break-words block min-h-[48px]"
+              <div className="pt-6 pb-2">
+                <RichEditableBlock
+                  blockId="doc-title"
+                  html={title}
                   placeholder="Nhập tiêu đề bài viết tại đây..."
+                  onChange={(val) => setTitle(val)}
+                  onFocus={() => {
+                    setFocusedBlockId('doc-title');
+                    updateToolbarActiveStates('doc-title');
+                  }}
+                  onSelectionChange={() => updateToolbarActiveStates('doc-title')}
+                  inputRef={(el) => {
+                    inputRefs.current['doc-title'] = el;
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (inputRefs.current['doc-sapo']) {
+                        inputRefs.current['doc-sapo'].focus();
+                      }
+                    }
+                  }}
+                  className="w-full bg-transparent text-2xl md:text-3xl lg:text-4xl text-slate-900 dark:text-white font-display font-bold outline-none leading-normal tracking-tight transition-all text-left break-words min-h-[56px] py-1.5 overflow-visible"
                 />
               </div>
 
               {/* Sapo / Lead Paragraph (Lời dẫn mở đầu liền mạch) */}
-              <div className="mb-6 pt-1">
-                <textarea
-                  rows={1}
-                  value={summary}
-                  onChange={(e) => {
-                    setSummary(e.target.value);
-                    e.target.style.height = 'auto';
-                    e.target.style.height = `${Math.max(36, e.target.scrollHeight)}px`;
+              <div className="mb-6 pt-2">
+                <RichEditableBlock
+                  blockId="doc-sapo"
+                  html={summary}
+                  placeholder="Tóm tắt bài viết..."
+                  onChange={(val) => setSummary(val)}
+                  onFocus={() => {
+                    setFocusedBlockId('doc-sapo');
+                    updateToolbarActiveStates('doc-sapo');
                   }}
-                  onFocus={() => setFocusedBlockId('doc-sapo')}
-                  className="w-full bg-transparent text-lg sm:text-xl text-slate-500 dark:text-[#a898be] font-medium italic placeholder-slate-400 dark:placeholder-[#8f7eab]/60 outline-none leading-relaxed focus:placeholder:opacity-30 transition-all resize-none overflow-hidden break-words block min-h-[36px]"
-                  placeholder="Nhập đoạn Sapo / tóm tắt mở đầu bài viết..."
+                  onSelectionChange={() => updateToolbarActiveStates('doc-sapo')}
+                  inputRef={(el) => {
+                    inputRefs.current['doc-sapo'] = el;
+                  }}
+                  className="w-full bg-transparent text-lg sm:text-xl text-slate-500 dark:text-[#a898be] font-medium italic outline-none leading-relaxed transition-all break-words min-h-[40px] py-1.5 overflow-visible"
                 />
               </div>
 

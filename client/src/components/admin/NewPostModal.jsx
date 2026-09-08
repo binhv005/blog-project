@@ -134,7 +134,7 @@ export default function NewPostModal({ isOpen, onClose }) {
             <textarea 
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
-              placeholder="Mô tả ngắn gọn tóm tắt bài viết..."
+              placeholder="Tóm tắt bài viết..."
               rows="3"
               className="w-full bg-slate-50 dark:bg-[#15111d] border border-slate-200 dark:border-[#2c2835] rounded-xl px-4 py-2.5 text-sm text-slate-900 dark:text-on-surface placeholder-slate-400 dark:placeholder-on-surface-variant/50 focus:outline-none focus:border-sky-500 dark:focus:border-[#4cd7f6] transition-all resize-none"
             />

@@ -14,7 +14,7 @@ export default function ArticleHeader() {
         <div className="relative w-full rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl dark:shadow-2xl group mb-6">
           <OptimizedImage
             src={activePost.coverImage}
-            alt={activePost.title}
+            alt={activePost.title?.replace(/<[^>]+>/g, '') || 'Ảnh bìa'}
             priority={true}
             sizes="(max-width: 1200px) 100vw, 1200px"
             containerClassName="w-full max-h-[480px]"
@@ -35,18 +35,25 @@ export default function ArticleHeader() {
       </div>
 
       {/* Main Title */}
-      <h1 className="text-3xl sm:text-4xl lg:text-[42px] font-extrabold text-slate-900 dark:text-white tracking-tight leading-[1.2] mb-5">
-        {activePost.title}
-      </h1>
+      <h1 
+        className="text-3xl sm:text-4xl lg:text-[42px] font-extrabold text-slate-900 dark:text-white tracking-tight leading-[1.2] mb-5"
+        dangerouslySetInnerHTML={{ __html: activePost.title }}
+      />
 
-      {/* Sapo / Lead Paragraph */}
-      {(activePost.sapo || activePost.summary) && (
-        <div className="relative border-l-4 border-[#ff5167] pl-4 sm:pl-5 py-2 my-5 bg-slate-50/80 dark:bg-[#1f182c]/60 rounded-r-2xl border-y border-r border-slate-200/60 dark:border-purple-900/20 shadow-sm">
-          <p className="text-base sm:text-lg lg:text-xl font-medium text-slate-500 dark:text-[#a898be] italic leading-relaxed">
-            {activePost.sapo || activePost.summary}
-          </p>
-        </div>
-      )}
+      {/* Sapo / Lead Paragraph (Chỉ giữ phần văn bản thuần túy, bỏ khung viền) */}
+      {(() => {
+        const rawSapo = activePost.sapo || activePost.summary || '';
+        const cleanSapo = rawSapo.replace(/<[^>]+>/g, '').trim();
+        if (!cleanSapo || cleanSapo === 'Tóm tắt bài viết...' || cleanSapo === 'Tóm tắt bài viết xem trước...') {
+          return null;
+        }
+        return (
+          <p 
+            className="text-base sm:text-lg lg:text-xl font-medium text-slate-500 dark:text-[#a898be] italic leading-relaxed my-4"
+            dangerouslySetInnerHTML={{ __html: rawSapo }}
+          />
+        );
+      })()}
     </div>
   );
 }

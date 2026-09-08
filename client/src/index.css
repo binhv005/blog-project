@@ -67,7 +67,8 @@ html.light ::-webkit-scrollbar-thumb {
 }
 
 /* Rich Text WYSIWYG ContentEditable Styles */
-[contenteditable][data-placeholder]:empty:before {
+[contenteditable][data-placeholder]:empty:before,
+[contenteditable][data-placeholder][data-empty="true"]:before {
   content: attr(data-placeholder);
   color: #9e8eb3;
   opacity: 0.6;
@@ -75,7 +76,8 @@ html.light ::-webkit-scrollbar-thumb {
   display: inline-block;
 }
 
-html.light [contenteditable][data-placeholder]:empty:before {
+html.light [contenteditable][data-placeholder]:empty:before,
+html.light [contenteditable][data-placeholder][data-empty="true"]:before {
   color: #94a3b8;
 }
 
