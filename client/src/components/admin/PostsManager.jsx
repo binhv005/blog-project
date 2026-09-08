@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useBlog } from '../../context/BlogContext';
 import { useToast } from '../../context/ToastContext';
 import { optimizeImageUrl } from '../../utils/mediaOptimizer';
@@ -8,44 +8,77 @@ import ConfirmModal from '../ConfirmModal';
 export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) {
   const { posts, deletePost, togglePostStatus, selectPost, resetToDefaults } = useBlog();
   const { toast } = useToast();
+  const listTopRef = useRef(null);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('Tất cả');
   const [filterStatus, setFilterStatus] = useState('all');
   const [postToDelete, setPostToDelete] = useState(null);
 
+  // Pagination states (Fixed 6 posts per page)
+  const POSTS_PER_PAGE = 6;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Dynamic categories list from posts
+  const categories = useMemo(() => {
+    const postCats = posts.map((p) => p.category).filter(Boolean);
+    const defaults = ['Công nghệ', 'AI & Big Data', 'Bảo mật', 'Thiết kế', 'Chính sách & Số hóa'];
+    const combined = Array.from(new Set([...defaults, ...postCats]));
+    return ['Tất cả', ...combined];
+  }, [posts]);
+
   // Filter posts
-  const filteredPosts = posts.filter((post) => {
-    const matchesSearch =
-      post.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      post.summary?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      post.author?.name?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory =
-      filterCategory === 'Tất cả' || post.category === filterCategory;
-    const matchesStatus =
-      filterStatus === 'all' || post.status === filterStatus;
-    return matchesSearch && matchesCategory && matchesStatus;
-  });
+  const filteredPosts = useMemo(() => {
+    return posts.filter((post) => {
+      const matchesSearch =
+        post.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        post.summary?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        post.author?.name?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCategory =
+        filterCategory === 'Tất cả' || post.category === filterCategory;
+      const matchesStatus =
+        filterStatus === 'all' || post.status === filterStatus;
+      return matchesSearch && matchesCategory && matchesStatus;
+    });
+  }, [posts, searchTerm, filterCategory, filterStatus]);
 
-  const categories = ['Tất cả', 'Công nghệ', 'AI & Big Data', 'Bảo mật', 'Thiết kế', 'Chính sách & Số hóa'];
+  // Reset to page 1 on filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterCategory, filterStatus]);
 
-  const [isSyncingCloudinary, setIsSyncingCloudinary] = useState(false);
+  // Pagination calculations
+  const totalPosts = filteredPosts.length;
+  const totalPages = Math.max(1, Math.ceil(totalPosts / POSTS_PER_PAGE));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
 
-  const handleSyncCloudinary = async () => {
-    setIsSyncingCloudinary(true);
-    try {
-      const res = await fetch('/api/upload/sync-all', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        toast.success(data.message || 'Đã đồng bộ toàn bộ ảnh lên Cloudinary thành công!');
-        window.location.reload();
-      } else {
-        toast.error('Lỗi đồng bộ: ' + data.message);
-      }
-    } catch (err) {
-      toast.error('Không thể kết nối API Cloudinary: ' + err.message);
-    } finally {
-      setIsSyncingCloudinary(false);
+  const startIndex = (safeCurrentPage - 1) * POSTS_PER_PAGE;
+  const endIndex = Math.min(startIndex + POSTS_PER_PAGE, totalPosts);
+  const paginatedPosts = filteredPosts.slice(startIndex, endIndex);
+
+  const handlePageChange = (newPage) => {
+    const target = Math.max(1, Math.min(totalPages, newPage));
+    setCurrentPage(target);
+    if (listTopRef.current) {
+      listTopRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+  };
+
+  // Generate page numbers with smart ellipsis
+  const getPageNumbers = () => {
+    const pages = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      if (safeCurrentPage <= 4) {
+        pages.push(1, 2, 3, 4, 5, '...', totalPages);
+      } else if (safeCurrentPage >= totalPages - 3) {
+        pages.push(1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
+      } else {
+        pages.push(1, '...', safeCurrentPage - 1, safeCurrentPage, safeCurrentPage + 1, '...', totalPages);
+      }
+    }
+    return pages;
   };
 
   const handleConfirmDelete = async () => {
@@ -58,7 +91,7 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
   };
 
   return (
-    <div className="flex flex-col gap-6 w-full">
+    <div ref={listTopRef} className="flex flex-col gap-6 w-full pb-28">
       {/* Top Filter & Actions Bar */}
       <div className="bg-white dark:bg-[#1e1a26]/90 border border-slate-200 dark:border-[#2c2835]/80 rounded-2xl p-4 sm:p-5 shadow-sm dark:shadow-xl flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 sm:gap-4 transition-colors">
         {/* Search Bar */}
@@ -71,16 +104,25 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Tìm kiếm bài viết theo tiêu đề, tác giả..."
-            className="w-full bg-slate-50 dark:bg-[#15111d] border border-slate-200 dark:border-[#2c2835] rounded-xl pl-10 pr-4 py-2 text-xs sm:text-sm text-slate-800 dark:text-on-surface placeholder-slate-400 dark:placeholder-on-surface-variant/50 focus:outline-none focus:border-sky-500 dark:focus:border-[#4cd7f6] transition-all"
+            className="w-full bg-slate-50 dark:bg-[#15111d] border border-slate-200 dark:border-[#2c2835] rounded-xl pl-10 pr-4 py-2 text-xs sm:text-sm text-slate-800 dark:text-on-surface placeholder-slate-400 dark:placeholder-on-surface-variant/50 focus:outline-none focus:border-sky-500 dark:focus:border-[#4cd7f6] transition-all font-medium"
           />
+          {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5"
+            >
+              <span className="material-symbols-outlined text-[16px]">close</span>
+            </button>
+          )}
         </div>
 
-        {/* Categories, Status Filter and Cloudinary Sync */}
+        {/* Categories, Status Filter and Actions */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <select
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value)}
-            className="bg-slate-50 dark:bg-[#15111d] border border-slate-200 dark:border-[#2c2835] rounded-xl px-2.5 sm:px-3 py-2 text-xs text-slate-800 dark:text-on-surface focus:outline-none focus:border-sky-500 dark:focus:border-[#4cd7f6] transition-all flex-1 sm:flex-initial cursor-pointer"
+            className="bg-slate-50 dark:bg-[#15111d] border border-slate-200 dark:border-[#2c2835] rounded-xl px-2.5 sm:px-3 py-2 text-xs text-slate-800 dark:text-on-surface focus:outline-none focus:border-sky-500 dark:focus:border-[#4cd7f6] transition-all flex-1 sm:flex-initial cursor-pointer font-medium"
           >
             {categories.map((c) => (
               <option key={c} value={c} className="bg-white dark:bg-[#1e1a26] text-slate-800 dark:text-on-surface">
@@ -126,12 +168,17 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
 
       {/* Posts Table / Card List */}
       <div className="bg-white dark:bg-[#1e1a26]/90 border border-slate-200 dark:border-[#2c2835]/80 rounded-2xl shadow-sm dark:shadow-xl overflow-hidden transition-colors">
-        <div className="p-5 border-b border-slate-200 dark:border-[#2c2835]/80 flex items-center justify-between">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-[#2c2835]/80 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
             <h2 className="font-display font-bold text-base text-slate-900 dark:text-on-surface">
               Danh sách bài viết ({filteredPosts.length})
             </h2>
+            {totalPages > 1 && (
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-500/10 text-sky-600 dark:text-[#4cd7f6]">
+                Trang {safeCurrentPage}/{totalPages}
+              </span>
+            )}
           </div>
           <button
             onClick={onOpenNewPost}
@@ -147,11 +194,11 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
             <span className="material-symbols-outlined text-4xl text-slate-400 dark:text-on-surface-variant mb-2">
               post_add
             </span>
-            <p className="text-slate-500 dark:text-on-surface-variant text-sm">Không tìm thấy bài viết nào phù hợp.</p>
+            <p className="text-slate-500 dark:text-on-surface-variant text-sm font-medium">Không tìm thấy bài viết nào phù hợp.</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-200 dark:divide-[#2c2835]/50">
-            {filteredPosts.map((post) => (
+            {paginatedPosts.map((post) => (
               <div
                 key={post.id}
                 className="p-3.5 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 hover:bg-slate-50/80 dark:hover:bg-[#221e2a]/60 transition-colors group"
@@ -186,7 +233,7 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
                         <span className={`w-1.5 h-1.5 rounded-full ${post.status === 'published' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                         {post.status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
                       </span>
-                      <span className="text-[11px] sm:text-xs text-slate-500 dark:text-on-surface-variant font-mono whitespace-nowrap">
+                      <span className="text-[11px] sm:text-xs text-slate-500 dark:text-on-surface-variant font-medium whitespace-nowrap">
                         {post.date}
                       </span>
                     </div>
@@ -201,9 +248,9 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
                     </h3>
                     
                     {/* Post Metadata with clean whitespace wrapping */}
-                    <div className="text-[11px] sm:text-xs text-slate-500 dark:text-on-surface-variant/80 font-mono mt-1 flex items-center gap-x-2.5 gap-y-1 flex-wrap">
-                      <span className="flex items-center gap-1 whitespace-nowrap">
-                        <span className="material-symbols-outlined text-[14px]">visibility</span>
+                    <div className="text-[11px] sm:text-xs text-slate-500 dark:text-on-surface-variant/80 mt-1 flex items-center gap-x-2.5 gap-y-1 flex-wrap">
+                      <span className="flex items-center gap-1 whitespace-nowrap font-medium text-slate-600 dark:text-slate-300">
+                        <span className="material-symbols-outlined text-[14px] text-slate-400">visibility</span>
                         <span>{post.views?.toLocaleString?.() || post.views} lượt xem</span>
                       </span>
                       <span className="text-slate-300 dark:text-on-surface-variant/40 hidden sm:inline">•</span>
@@ -267,6 +314,73 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
             ))}
           </div>
         )}
+
+        {/* Pagination Footer */}
+        {totalPosts > 0 && (
+          <div className="p-4 sm:p-5 border-t border-slate-200 dark:border-[#2c2835]/80 bg-slate-50/50 dark:bg-[#1a1622]/50 flex flex-col sm:flex-row items-center justify-between gap-4">
+            {/* Left: Summary Info */}
+            <div className="text-xs font-display text-slate-500 dark:text-on-surface-variant flex items-center gap-2">
+              <span>
+                Hiển thị <strong className="text-slate-900 dark:text-white font-bold">{startIndex + 1}</strong> - <strong className="text-slate-900 dark:text-white font-bold">{endIndex}</strong> / <strong className="text-slate-900 dark:text-white font-bold">{totalPosts}</strong> bài viết
+              </span>
+            </div>
+
+            {/* Right: Page Navigation Buttons */}
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1 sm:gap-1.5 select-none">
+                {/* Previous Button */}
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(safeCurrentPage - 1)}
+                  disabled={safeCurrentPage === 1}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-[#2c2835] bg-white dark:bg-[#15111d] text-slate-700 dark:text-on-surface text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-[#221e2a] hover:border-sky-400 dark:hover:border-[#4cd7f6]/40 transition-all flex items-center gap-1"
+                  title="Trang trước"
+                >
+                  <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+                  <span className="hidden sm:inline">Trước</span>
+                </button>
+
+                {/* Page Numbers */}
+                {getPageNumbers().map((page, idx) => {
+                  if (page === '...') {
+                    return (
+                      <span key={`ellipsis-${idx}`} className="px-1.5 py-1 text-xs text-slate-400 dark:text-slate-500 font-bold">
+                        ...
+                      </span>
+                    );
+                  }
+                  const isActive = page === safeCurrentPage;
+                  return (
+                    <button
+                      key={page}
+                      type="button"
+                      onClick={() => handlePageChange(page)}
+                      className={`min-w-[32px] h-8 rounded-xl text-xs font-semibold font-display transition-all flex items-center justify-center ${
+                        isActive
+                          ? 'bg-gradient-to-r from-sky-500 to-sky-600 dark:from-[#03b5d3] dark:to-[#4cd7f6] text-white shadow-md shadow-sky-500/20 dark:shadow-[#03b5d3]/20 font-bold'
+                          : 'bg-white dark:bg-[#15111d] border border-slate-200 dark:border-[#2c2835] text-slate-700 dark:text-on-surface hover:bg-slate-100 dark:hover:bg-[#221e2a] hover:border-sky-400 dark:hover:border-[#4cd7f6]/40'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  );
+                })}
+
+                {/* Next Button */}
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(safeCurrentPage + 1)}
+                  disabled={safeCurrentPage === totalPages}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-[#2c2835] bg-white dark:bg-[#15111d] text-slate-700 dark:text-on-surface text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-[#221e2a] hover:border-sky-400 dark:hover:border-[#4cd7f6]/40 transition-all flex items-center gap-1"
+                  title="Trang sau"
+                >
+                  <span className="hidden sm:inline">Sau</span>
+                  <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Delete Confirmation Modal Popup */}
@@ -283,3 +397,4 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
     </div>
   );
 }
+

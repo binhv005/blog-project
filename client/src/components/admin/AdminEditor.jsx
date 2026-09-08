@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useBlog } from '../../context/BlogContext';
 import { useToast } from '../../context/ToastContext';
 import { compressImageFile, optimizeImageUrl, formatVideoEmbedUrl } from '../../utils/mediaOptimizer';
@@ -221,11 +221,12 @@ const readFileAsBase64 = (file) => {
 };
 
 export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
-  const { createPost, updatePost, selectPost, setTemporaryPreviewPost } = useBlog();
+  const { createPost, updatePost, selectPost, setTemporaryPreviewPost, posts } = useBlog();
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   const coverFileInputRef = useRef(null);
   const titleTextareaRef = useRef(null);
+  const newCategoryInputRef = useRef(null);
   const [targetBlockIndex, setTargetBlockIndex] = useState(null);
 
   // Publish Success Modal State
@@ -251,6 +252,63 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   const [metaDesc, setMetaDesc] = useState(postToEdit?.metaDesc || postToEdit?.summary || '');
   const [tags, setTags] = useState(postToEdit?.tags || []);
   const [newTagInput, setNewTagInput] = useState('');
+
+  // Category Management State
+  const defaultCategories = [
+    'Công nghệ & Kiến trúc phần mềm',
+    'An ninh mạng & Zero-Trust',
+    'DevOps & Điện toán đám mây',
+    'Fintech & Hệ thống chịu tải cao',
+    'AI & Big Data',
+    'Thiết kế & Trải nghiệm UX',
+    'Chính sách & Số hóa'
+  ];
+
+  const [customCategories, setCustomCategories] = useState(() => {
+    try {
+      const saved = localStorage.getItem('dudi_custom_categories');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+
+  // Auto-focus input when opened
+  useEffect(() => {
+    if (isAddingCategory && newCategoryInputRef.current) {
+      newCategoryInputRef.current.focus();
+    }
+  }, [isAddingCategory]);
+
+  const allCategories = useMemo(() => {
+    const fromPosts = (posts || []).map((p) => p.category).filter(Boolean);
+    const set = new Set([
+      ...defaultCategories,
+      ...fromPosts,
+      ...customCategories,
+      ...(postToEdit?.category ? [postToEdit.category] : [])
+    ]);
+    return Array.from(set);
+  }, [posts, customCategories, postToEdit]);
+
+  const handleAddCategory = () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) return;
+    if (!allCategories.includes(trimmed)) {
+      const updated = [...customCategories, trimmed];
+      setCustomCategories(updated);
+      try {
+        localStorage.setItem('dudi_custom_categories', JSON.stringify(updated));
+      } catch (_) {}
+    }
+    setCategory(trimmed);
+    setNewCategoryName('');
+    setIsAddingCategory(false);
+    toast.success(`Đã chọn danh mục mới: "${trimmed}"`);
+  };
 
   // Initial Sequential Blocks
   const getInitialBlocks = () => {
@@ -2564,22 +2622,90 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
               <h3 className="font-display font-bold text-sm text-slate-900 dark:text-[#e8dff1]">Phân loại &amp; Thẻ tags</h3>
             </div>
 
-            <div className="flex flex-col gap-1 mb-3">
-              <label className="text-xs font-semibold text-slate-600 dark:text-[#ad8888]">Danh mục chính</label>
-              <div className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-[#15111d] text-slate-900 dark:text-[#e8dff1] border border-slate-200 dark:border-[#2c2835]">
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="bg-transparent text-slate-900 dark:text-[#e8dff1] text-xs outline-none w-full cursor-pointer"
-                >
-                  <option className="bg-white dark:bg-[#15111d] text-slate-900 dark:text-white" value="Công nghệ & Kiến trúc phần mềm">Công nghệ &amp; Kiến trúc phần mềm</option>
-                  <option className="bg-white dark:bg-[#15111d] text-slate-900 dark:text-white" value="An ninh mạng & Zero-Trust">An ninh mạng &amp; Zero-Trust</option>
-                  <option className="bg-white dark:bg-[#15111d] text-slate-900 dark:text-white" value="DevOps & Điện toán đám mây">DevOps &amp; Điện toán đám mây</option>
-                  <option className="bg-white dark:bg-[#15111d] text-slate-900 dark:text-white" value="Fintech & Hệ thống chịu tải cao">Fintech &amp; Hệ thống chịu tải cao</option>
-                </select>
+            {/* Category Section */}
+            <div className="flex flex-col gap-1.5 mb-4">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-600 dark:text-[#ad8888]">Danh mục chính</label>
+                {!isAddingCategory && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingCategory(true)}
+                    className="text-[11px] font-display font-medium text-sky-600 dark:text-[#4cd7f6] hover:underline flex items-center gap-0.5 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">add</span>
+                    <span>Thêm danh mục</span>
+                  </button>
+                )}
               </div>
+
+              {isAddingCategory ? (
+                <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-50 dark:bg-[#15111d] border border-sky-400/80 dark:border-[#4cd7f6]/60 shadow-sm animate-fadeIn">
+                  <input
+                    ref={newCategoryInputRef}
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCategory();
+                      } else if (e.key === 'Escape') {
+                        setIsAddingCategory(false);
+                        setNewCategoryName('');
+                      }
+                    }}
+                    placeholder="Nhập tên danh mục..."
+                    className="bg-transparent text-slate-900 dark:text-[#e8dff1] text-xs outline-none px-2 flex-1 min-w-0 placeholder-slate-400 dark:placeholder-slate-500 font-medium"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddCategory}
+                    disabled={!newCategoryName.trim()}
+                    className="px-2.5 py-1 rounded-lg bg-sky-500 hover:bg-sky-600 disabled:opacity-50 dark:bg-[#03b5d3] dark:hover:bg-[#4cd7f6] text-white text-xs font-semibold shadow transition-all flex items-center gap-1 flex-shrink-0"
+                    title="Lưu danh mục"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">check</span>
+                    <span>Thêm</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingCategory(false);
+                      setNewCategoryName('');
+                    }}
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors flex-shrink-0"
+                    title="Hủy"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">close</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="relative px-3 py-2 rounded-xl bg-slate-50 dark:bg-[#15111d] text-slate-900 dark:text-[#e8dff1] border border-slate-200 dark:border-[#2c2835]">
+                  <select
+                    value={category}
+                    onChange={(e) => {
+                      if (e.target.value === '__NEW__') {
+                        setIsAddingCategory(true);
+                      } else {
+                        setCategory(e.target.value);
+                      }
+                    }}
+                    className="bg-transparent text-slate-900 dark:text-[#e8dff1] text-xs outline-none w-full cursor-pointer pr-6 font-medium"
+                  >
+                    {allCategories.map((cat) => (
+                      <option key={cat} className="bg-white dark:bg-[#15111d] text-slate-900 dark:text-white" value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                    <option value="__NEW__" className="bg-white dark:bg-[#15111d] text-sky-600 dark:text-[#4cd7f6] font-semibold">
+                      + Thêm danh mục mới...
+                    </option>
+                  </select>
+                </div>
+              )}
             </div>
 
+            {/* Tags Section */}
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-slate-600 dark:text-[#ad8888]">Thẻ tìm kiếm (Tags)</label>
               <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-slate-50 dark:bg-[#15111d] min-h-[44px] border border-slate-200 dark:border-[#2c2835]">

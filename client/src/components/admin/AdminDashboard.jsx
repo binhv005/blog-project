@@ -230,7 +230,7 @@ export default function AdminDashboard({ onNavigate }) {
             </div>
 
             {/* Content Area */}
-            <main className="flex-1 p-3 sm:p-6 max-w-[1600px] w-full mx-auto">
+            <main className="flex-1 p-3 sm:p-6 pb-28 sm:pb-32 max-w-[1600px] w-full mx-auto">
               {subView === 'list' ? (
                 <PostsManager 
                   onEditPost={handleEditPost}
