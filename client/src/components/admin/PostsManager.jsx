@@ -19,12 +19,13 @@ export default function PostsManager({ onEditPost, onOpenNewPost, onNavigate }) 
   const POSTS_PER_PAGE = 6;
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Dynamic categories list from posts
+  // Dynamic categories list directly from posts in database
   const categories = useMemo(() => {
-    const postCats = posts.map((p) => p.category).filter(Boolean);
-    const defaults = ['Công nghệ', 'AI & Big Data', 'Bảo mật', 'Thiết kế', 'Chính sách & Số hóa'];
-    const combined = Array.from(new Set([...defaults, ...postCats]));
-    return ['Tất cả', ...combined];
+    const postCats = posts
+      .map((p) => p.category)
+      .filter((c) => c && typeof c === 'string' && c.trim().length > 0);
+    const distinct = Array.from(new Set(postCats)).sort();
+    return ['Tất cả', ...distinct];
   }, [posts]);
 
   // Filter posts

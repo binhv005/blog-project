@@ -253,17 +253,6 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   const [tags, setTags] = useState(postToEdit?.tags || []);
   const [newTagInput, setNewTagInput] = useState('');
 
-  // Category Management State
-  const defaultCategories = [
-    'Công nghệ & Kiến trúc phần mềm',
-    'An ninh mạng & Zero-Trust',
-    'DevOps & Điện toán đám mây',
-    'Fintech & Hệ thống chịu tải cao',
-    'AI & Big Data',
-    'Thiết kế & Trải nghiệm UX',
-    'Chính sách & Số hóa'
-  ];
-
   const [customCategories, setCustomCategories] = useState(() => {
     try {
       const saved = localStorage.getItem('dudi_custom_categories');
@@ -284,14 +273,15 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   }, [isAddingCategory]);
 
   const allCategories = useMemo(() => {
-    const fromPosts = (posts || []).map((p) => p.category).filter(Boolean);
+    const fromPosts = (posts || [])
+      .map((p) => p.category)
+      .filter((c) => c && typeof c === 'string' && c.trim().length > 0);
     const set = new Set([
-      ...defaultCategories,
       ...fromPosts,
       ...customCategories,
       ...(postToEdit?.category ? [postToEdit.category] : [])
     ]);
-    return Array.from(set);
+    return Array.from(set).sort();
   }, [posts, customCategories, postToEdit]);
 
   const handleAddCategory = () => {

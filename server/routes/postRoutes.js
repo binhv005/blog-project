@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   getPosts,
+  getCategories,
   getPostByIdOrSlug,
   createPost,
   updatePost,
@@ -12,6 +13,7 @@ import {
 const router = express.Router();
 
 router.get('/', getPosts);
+router.get('/categories', getCategories);
 router.post('/seed', seedDefaultPosts);
 router.get('/:idOrSlug', getPostByIdOrSlug);
 router.post('/', createPost);
@@ -20,3 +22,4 @@ router.patch('/:id/toggle-status', togglePostStatus);
 router.delete('/:id', deletePost);
 
 export default router;
+

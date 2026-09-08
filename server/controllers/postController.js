@@ -258,6 +258,17 @@ export const deletePost = async (req, res) => {
   }
 };
 
+// GET /api/posts/categories - Get distinct categories directly from MongoDB
+export const getCategories = async (req, res) => {
+  try {
+    const categories = await Post.distinct('category');
+    const cleanCategories = categories.filter((c) => c && typeof c === 'string' && c.trim().length > 0).sort();
+    res.json({ success: true, count: cleanCategories.length, data: cleanCategories });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // POST /api/posts/seed - Reset and seed defaults
 export const seedDefaultPosts = async (req, res) => {
   try {
@@ -268,3 +279,4 @@ export const seedDefaultPosts = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
