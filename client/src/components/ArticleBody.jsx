@@ -15,14 +15,21 @@ function formatRichText(raw) {
     .replace(/<div align="center"[^>]*>([\s\S]*?)<\/div>/gi, '<div class="text-center my-1">$1</div>')
     .replace(/<div align="right"[^>]*>([\s\S]*?)<\/div>/gi, '<div class="text-right my-1">$1</div>');
 
+  // Format list tags to guarantee proper indentation inside
+  text = text
+    .replace(/<ul\b([^>]*)>/gi, '<ul class="my-4 space-y-2 list-disc list-outside ml-6 sm:ml-8 pl-2 text-slate-800 dark:text-slate-200" $1>')
+    .replace(/<ol\b([^>]*)>/gi, '<ol class="my-4 space-y-2 list-decimal list-outside ml-6 sm:ml-8 pl-2 text-slate-800 dark:text-slate-200" $1>')
+    .replace(/<li\b([^>]*)>/gi, '<li class="leading-relaxed pl-1" $1>');
+
   return text
-    // Embedded images: ![caption](url)
-    .replace(/!\[(.*?)\]\((.*?)\)/g, (_, caption, url) => {
+    // Embedded images: ![caption](url) or ![caption|width](url)
+    .replace(/!\[(.*?)(?:\|(.*?))?\]\((.*?)\)/g, (_, caption, sizeParam, url) => {
       const cleanCaption = caption ? caption.trim() : '';
+      const customWidth = sizeParam ? sizeParam.trim() : '100%';
       const optimizedUrl = optimizeImageUrl(url, { width: 1000, quality: 80 });
-      return `<figure class="my-6 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl max-w-3xl mx-auto flex flex-col items-center">
-        <img src="${optimizedUrl}" alt="${cleanCaption || 'Hình ảnh bài viết WebP'}" loading="lazy" decoding="async" class="w-full max-h-[480px] object-cover rounded-t-2xl transition-transform duration-500 hover:scale-[1.01] block mx-auto" />
-        ${cleanCaption ? `<figcaption class="w-full text-xs text-slate-600 dark:text-slate-400 italic text-center py-2.5 px-4 bg-slate-50 dark:bg-[#100c18] border-t border-slate-200 dark:border-white/5">${cleanCaption}</figcaption>` : ''}
+      return `<figure class="my-6 mx-auto flex flex-col items-center" style="width: ${customWidth}; max-width: 100%;">
+        <img src="${optimizedUrl}" alt="${cleanCaption || 'Hình ảnh bài viết WebP'}" loading="lazy" decoding="async" class="w-full max-h-[520px] object-cover rounded-2xl transition-transform duration-500 hover:scale-[1.005] block mx-auto shadow-md" />
+        ${cleanCaption ? `<figcaption class="w-full text-xs text-slate-500 dark:text-slate-400 italic text-center pt-2.5 px-4">${cleanCaption}</figcaption>` : ''}
       </figure>`;
     })
     .replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-slate-900 dark:text-white">$1</strong>')
@@ -78,17 +85,32 @@ export default function ArticleBody() {
             }
 
             if (block.type === 'image' && block.url) {
+              const imageWidth = block.width || '100%';
+              const imageAlign = block.align || 'center';
+              const alignClasses =
+                imageAlign === 'left'
+                  ? 'mr-auto text-left items-start'
+                  : imageAlign === 'right'
+                  ? 'ml-auto text-right items-end'
+                  : 'mx-auto text-center items-center';
+              const maxHeightStyle = block.maxHeight || '520px';
+
               return (
-                <figure key={block.id || idx} className="my-8 rounded-2xl overflow-hidden border border-slate-200 dark:border-purple-900/30 bg-slate-100 dark:bg-[#151025] shadow-xl max-w-3xl mx-auto flex flex-col items-center">
+                <figure
+                  key={block.id || idx}
+                  className={`my-8 max-w-full flex flex-col ${alignClasses}`}
+                  style={{ width: imageWidth, maxWidth: '100%' }}
+                >
                   <OptimizedImage
                     src={block.url}
                     alt={block.caption || 'Hình minh họa WebP'}
                     sizes="(max-width: 768px) 100vw, 1000px"
-                    containerClassName="w-full max-h-[480px]"
-                    className="w-full max-h-[480px] object-cover block mx-auto"
+                    containerClassName="w-full rounded-2xl overflow-hidden shadow-lg"
+                    style={{ maxHeight: maxHeightStyle }}
+                    className="w-full object-cover rounded-2xl block mx-auto transition-transform duration-500 hover:scale-[1.005]"
                   />
                   {block.caption && (
-                    <figcaption className="w-full text-xs text-slate-600 dark:text-slate-400 italic text-center py-2.5 px-4 bg-slate-50 dark:bg-[#100c18] border-t border-slate-200 dark:border-white/5">
+                    <figcaption className="w-full text-xs text-slate-500 dark:text-slate-400 italic pt-2.5 px-2">
                       {block.caption}
                     </figcaption>
                   )}
@@ -114,17 +136,17 @@ export default function ArticleBody() {
 
             if (block.type === 'list' && block.items && block.items.length > 0) {
               return block.listType === 'numbered' ? (
-                <ol key={block.id || idx} className="my-6 space-y-2 list-decimal list-inside pl-2 text-slate-800 dark:text-slate-200">
+                <ol key={block.id || idx} className="my-6 space-y-2.5 list-decimal list-outside ml-6 sm:ml-8 pl-2 text-slate-800 dark:text-slate-200">
                   {block.items.filter(Boolean).map((item, iIdx) => (
-                    <li key={iIdx} className="leading-relaxed">
+                    <li key={iIdx} className="leading-relaxed pl-1">
                       <span className="text-slate-900 dark:text-white font-medium">{item}</span>
                     </li>
                   ))}
                 </ol>
               ) : (
-                <ul key={block.id || idx} className="my-6 space-y-2 list-disc list-inside pl-2 text-slate-800 dark:text-slate-200">
+                <ul key={block.id || idx} className="my-6 space-y-2.5 list-disc list-outside ml-6 sm:ml-8 pl-2 text-slate-800 dark:text-slate-200">
                   {block.items.filter(Boolean).map((item, iIdx) => (
-                    <li key={iIdx} className="leading-relaxed">
+                    <li key={iIdx} className="leading-relaxed pl-1">
                       <span className="text-slate-900 dark:text-white font-medium">{item}</span>
                     </li>
                   ))}
@@ -196,6 +218,134 @@ export default function ArticleBody() {
             if (block.type === 'divider') {
               return (
                 <hr key={block.id || idx} className="my-8 border-t border-slate-200 dark:border-white/10" />
+              );
+            }
+
+            if (block.type === 'code' && (block.code || block.text)) {
+              return (
+                <div key={block.id || idx} className="my-6 rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 shadow-xl">
+                  <div className="px-4 py-2 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between text-xs font-mono text-slate-400">
+                    <span className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500/80 inline-block"></span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 inline-block"></span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block"></span>
+                      <span className="ml-2">Code snippet</span>
+                    </span>
+                  </div>
+                  <pre className="p-4 sm:p-5 overflow-x-auto text-xs sm:text-sm font-mono text-[#4cd7f6] leading-relaxed">
+                    <code>{block.code || block.text}</code>
+                  </pre>
+                </div>
+              );
+            }
+
+            if (block.type === 'columns') {
+              const layout = block.layout || '50-50';
+
+              let gridColsClass = 'grid-cols-1 md:grid-cols-2';
+              let leftColClass = '';
+              let rightColClass = '';
+
+              if (layout === '60-40') {
+                gridColsClass = 'grid-cols-1 md:grid-cols-12';
+                leftColClass = 'md:col-span-7';
+                rightColClass = 'md:col-span-5';
+              } else if (layout === '40-60') {
+                gridColsClass = 'grid-cols-1 md:grid-cols-12';
+                leftColClass = 'md:col-span-5';
+                rightColClass = 'md:col-span-7';
+              } else if (layout === '70-30') {
+                gridColsClass = 'grid-cols-1 md:grid-cols-12';
+                leftColClass = 'md:col-span-8';
+                rightColClass = 'md:col-span-4';
+              } else if (layout === '30-70') {
+                gridColsClass = 'grid-cols-1 md:grid-cols-12';
+                leftColClass = 'md:col-span-4';
+                rightColClass = 'md:col-span-8';
+              }
+
+              return (
+                <div key={block.id || idx} className="my-6 w-full">
+                  <div className={`grid ${gridColsClass} gap-6 sm:gap-8 items-center`}>
+                    {/* Left Column */}
+                    <div className={`${leftColClass} space-y-2`}>
+                      {block.leftTitle && (
+                        <h4 className="text-sm font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 pb-1 border-b border-slate-200 dark:border-white/10">
+                          {block.leftTitle}
+                        </h4>
+                      )}
+                      {block.leftType === 'image' && block.leftImageUrl ? (
+                        <figure className="my-2 max-w-full flex flex-col items-center">
+                          <OptimizedImage
+                            src={block.leftImageUrl}
+                            alt={block.leftImageCaption || 'Hình ảnh cột trái'}
+                            sizes="(max-width: 768px) 100vw, 600px"
+                            containerClassName="w-full rounded-2xl overflow-hidden"
+                            style={
+                              block.leftImageHeight && block.leftImageHeight.includes('px')
+                                ? { height: block.leftImageHeight }
+                                : block.leftImageHeight === '16:9'
+                                ? { aspectRatio: '16/9' }
+                                : block.leftImageHeight === '1:1'
+                                ? { aspectRatio: '1/1' }
+                                : { aspectRatio: '4/3' }
+                            }
+                            className="w-full h-full object-cover rounded-2xl block mx-auto"
+                          />
+                          {block.leftImageCaption && (
+                            <figcaption className="w-full text-xs text-slate-500 dark:text-slate-400 italic text-center pt-2 px-2">
+                              {block.leftImageCaption}
+                            </figcaption>
+                          )}
+                        </figure>
+                      ) : (
+                        <div
+                          className="leading-relaxed text-slate-800 dark:text-slate-300 space-y-3"
+                          dangerouslySetInnerHTML={{ __html: formatRichText(block.leftText || '') }}
+                        />
+                      )}
+                    </div>
+
+                    {/* Right Column (Side-by-side / Cạnh đoạn văn) */}
+                    <div className={`${rightColClass} space-y-2`}>
+                      {block.rightTitle && (
+                        <h4 className="text-sm font-bold uppercase tracking-wider text-sky-600 dark:text-[#4cd7f6] pb-1 border-b border-slate-200 dark:border-white/10">
+                          {block.rightTitle}
+                        </h4>
+                      )}
+                      {block.rightType === 'image' && block.rightImageUrl ? (
+                        <figure className="my-2 max-w-full flex flex-col items-center">
+                          <OptimizedImage
+                            src={block.rightImageUrl}
+                            alt={block.rightImageCaption || 'Hình ảnh cột phải'}
+                            sizes="(max-width: 768px) 100vw, 600px"
+                            containerClassName="w-full rounded-2xl overflow-hidden"
+                            style={
+                              block.rightImageHeight && block.rightImageHeight.includes('px')
+                                ? { height: block.rightImageHeight }
+                                : block.rightImageHeight === '16:9'
+                                ? { aspectRatio: '16/9' }
+                                : block.rightImageHeight === '1:1'
+                                ? { aspectRatio: '1/1' }
+                                : { aspectRatio: '4/3' }
+                            }
+                            className="w-full h-full object-cover rounded-2xl block mx-auto"
+                          />
+                          {block.rightImageCaption && (
+                            <figcaption className="w-full text-xs text-slate-500 dark:text-slate-400 italic text-center pt-2 px-2">
+                              {block.rightImageCaption}
+                            </figcaption>
+                          )}
+                        </figure>
+                      ) : (
+                        <div
+                          className="leading-relaxed text-slate-800 dark:text-slate-300 space-y-3"
+                          dangerouslySetInnerHTML={{ __html: formatRichText(block.rightText || '') }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
               );
             }
 

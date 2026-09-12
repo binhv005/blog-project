@@ -133,6 +133,7 @@ function RichEditableBlock({
   onFocus,
   onBlur,
   onSelectionChange,
+  onPasteImage,
   placeholder,
   className = '',
   style = {},
@@ -174,6 +175,21 @@ function RichEditableBlock({
   const handlePaste = (e) => {
     const clipboardData = e.clipboardData || window.clipboardData;
     if (!clipboardData) return;
+
+    // 1. Check if an image file is in clipboard (e.g. screenshot, Snipping Tool, copied image)
+    const items = clipboardData.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file && onPasteImage) {
+            e.preventDefault();
+            onPasteImage(file);
+            return;
+          }
+        }
+      }
+    }
 
     const htmlData = clipboardData.getData('text/html');
     const plainText = clipboardData.getData('text/plain');
@@ -234,12 +250,320 @@ const readFileAsBase64 = (file) => {
   });
 };
 
+// Interactive Resizable Image Block Component
+function ResizableImageBlock({
+  block,
+  onUpdate,
+  onDelete,
+  onReplace,
+  onPaste,
+}) {
+  const [isResizing, setIsResizing] = useState(false);
+  const [dragStartX, setDragStartX] = useState(0);
+  const [initialWidthPx, setInitialWidthPx] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
+  const containerRef = useRef(null);
+
+  const currentWidth = block.width || '100%';
+  const currentAlign = block.align || 'center';
+
+  // Handle Drag to Resize width
+  const handleMouseDownResize = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    setDragStartX(e.clientX);
+    if (containerRef.current) {
+      setInitialWidthPx(containerRef.current.offsetWidth);
+    }
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e) => {
+      if (!containerRef.current) return;
+      const parentWidth = containerRef.current.parentElement?.offsetWidth || window.innerWidth;
+      const deltaX = (e.clientX - dragStartX) * 2;
+      const newPx = Math.max(120, Math.min(parentWidth, initialWidthPx + deltaX));
+      const percentage = Math.round((newPx / parentWidth) * 100);
+      const clampedPercent = Math.max(20, Math.min(100, percentage));
+      onUpdate({ width: `${clampedPercent}%` });
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, dragStartX, initialWidthPx, onUpdate]);
+
+  const alignClass =
+    currentAlign === 'left'
+      ? 'mr-auto items-start text-left'
+      : currentAlign === 'right'
+      ? 'ml-auto items-end text-right'
+      : 'mx-auto items-center text-center';
+
+  return (
+    <div
+      className={`my-6 max-w-full flex flex-col ${alignClass} group/img relative transition-all duration-200`}
+      style={{ width: currentWidth }}
+      ref={containerRef}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {/* Main Image Container */}
+      <div className="relative w-full rounded-2xl overflow-hidden group/preview">
+        <OptimizedImage
+          src={block.url}
+          alt={block.caption || 'Ảnh minh họa WebP'}
+          sizes="(max-width: 768px) 100vw, 1000px"
+          containerClassName="w-full max-h-[520px] rounded-2xl"
+          className="w-full max-h-[520px] object-cover rounded-2xl block mx-auto transition-transform duration-500 hover:scale-[1.005]"
+        />
+
+        {/* Action Buttons (top right on hover) */}
+        <div className="absolute top-3 right-3 opacity-0 group-hover/preview:opacity-100 flex items-center gap-1.5 backdrop-blur-md bg-slate-900/80 p-1 rounded-xl shadow-md transition-all z-10">
+          {onPaste && (
+            <button
+              type="button"
+              onClick={onPaste}
+              className="p-1.5 rounded-lg text-purple-300 hover:bg-purple-600 hover:text-white transition-all active:scale-95"
+              title="Dán ảnh thay thế từ clipboard (Ctrl+V)"
+            >
+              <span className="material-symbols-outlined text-[16px]">content_paste</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onReplace}
+            className="p-1.5 rounded-lg text-sky-300 hover:bg-sky-600 hover:text-white transition-all active:scale-95"
+            title="Đổi ảnh từ máy tính"
+          >
+            <span className="material-symbols-outlined text-[16px]">swap_horiz</span>
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-600 hover:text-white transition-all active:scale-95"
+            title="Xóa ảnh"
+          >
+            <span className="material-symbols-outlined text-[16px]">delete</span>
+          </button>
+        </div>
+
+        {/* Corner Drag Resize Handle (Bottom-Right) */}
+        <div
+          onMouseDown={handleMouseDownResize}
+          className="absolute bottom-2 right-2 w-6 h-6 rounded-lg bg-black/70 hover:bg-[#ff5167] text-white flex items-center justify-center cursor-nwse-resize shadow-md backdrop-blur-md opacity-0 group-hover/preview:opacity-100 transition-opacity z-10"
+          title="Kéo để thay đổi kích thước ảnh"
+        >
+          <span className="material-symbols-outlined text-[14px]">drag_pan</span>
+        </div>
+      </div>
+
+      {/* Caption Input */}
+      <div className="w-full mt-2 text-center">
+        <input
+          value={block.caption || ''}
+          onChange={(e) => onUpdate({ caption: e.target.value })}
+          className="w-full text-center bg-transparent text-xs text-slate-500 dark:text-[#a898be] italic outline-none hover:text-slate-700 dark:hover:text-[#e8dff1] focus:text-sky-600 dark:focus:text-[#4cd7f6] transition-colors"
+          placeholder="Nhập chú thích ảnh (.webp)..."
+        />
+      </div>
+    </div>
+  );
+}
+
+// Interactive Resizable Column Image Component (with vertical drag resize handle, aspect ratio presets, paste controls and quick actions)
+function ColumnImageResizable({
+  imageUrl,
+  caption,
+  imageHeight,
+  onUpdate,
+  onUploadClick,
+  onPasteClick,
+  onDelete,
+}) {
+  const [isResizing, setIsResizing] = useState(false);
+  const [dragStartY, setDragStartY] = useState(0);
+  const [initialHeightPx, setInitialHeightPx] = useState(0);
+  const containerRef = useRef(null);
+
+  const isCustomPx = Boolean(imageHeight && typeof imageHeight === 'string' && imageHeight.includes('px'));
+  const currentRatio = !imageHeight || imageHeight === 'auto' ? 'auto' : imageHeight;
+
+  const getContainerStyle = () => {
+    if (isCustomPx) return { height: imageHeight };
+    if (imageHeight === '16:9') return { aspectRatio: '16/9' };
+    if (imageHeight === '4:3') return { aspectRatio: '4/3' };
+    if (imageHeight === '1:1') return { aspectRatio: '1/1' };
+    return { aspectRatio: '4/3' }; // Default harmonious proportional ratio
+  };
+
+  const handleMouseDownResize = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+    setDragStartY(e.clientY);
+    if (containerRef.current) {
+      setInitialHeightPx(containerRef.current.offsetHeight);
+    }
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e) => {
+      const deltaY = e.clientY - dragStartY;
+      const newHeight = Math.max(100, Math.min(800, initialHeightPx + deltaY));
+      onUpdate({ height: `${newHeight}px` });
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, dragStartY, initialHeightPx, onUpdate]);
+
+  return (
+    <div className="relative group/colimg flex flex-col items-center w-full">
+      <div
+        ref={containerRef}
+        className="relative w-full rounded-2xl overflow-hidden transition-all duration-200"
+        style={getContainerStyle()}
+      >
+        <OptimizedImage
+          src={imageUrl}
+          alt={caption || 'Ảnh cột'}
+          containerClassName="w-full h-full rounded-2xl"
+          className="w-full h-full object-cover rounded-2xl block mx-auto"
+        />
+
+        {/* Action & Aspect Ratio Controls Overlay */}
+        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/colimg:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-2 z-10">
+          <div className="flex items-center gap-1.5 flex-wrap justify-center">
+            <button
+              type="button"
+              onClick={onUploadClick}
+              className="px-2.5 py-1 bg-sky-500 hover:bg-sky-600 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-md active:scale-95 transition-all"
+              title="Đổi ảnh từ máy tính"
+            >
+              <span className="material-symbols-outlined text-[14px]">upload</span>
+              <span>Đổi</span>
+            </button>
+            {onPasteClick && (
+              <button
+                type="button"
+                onClick={onPasteClick}
+                className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-md active:scale-95 transition-all"
+                title="Dán ảnh từ bộ nhớ tạm (Clipboard / Ctrl+V)"
+              >
+                <span className="material-symbols-outlined text-[14px]">content_paste</span>
+                <span>Dán</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onDelete}
+              className="p-1 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-xs shadow-md active:scale-95 transition-all"
+              title="Xóa ảnh"
+            >
+              <span className="material-symbols-outlined text-[14px]">delete</span>
+            </button>
+          </div>
+
+          {/* Quick Aspect Ratio Presets */}
+          <div className="flex items-center gap-1 bg-black/70 backdrop-blur-md px-1.5 py-0.5 rounded-lg border border-white/10 text-[10px] text-white">
+            <button
+              type="button"
+              onClick={() => onUpdate({ height: 'auto' })}
+              className={`px-1.5 py-0.5 rounded font-medium transition-colors ${
+                currentRatio === 'auto' && !isCustomPx ? 'bg-rose-500 text-white' : 'hover:bg-white/20 text-slate-200'
+              }`}
+              title="Tự động cân đối tỷ lệ"
+            >
+              Tự động
+            </button>
+            <button
+              type="button"
+              onClick={() => onUpdate({ height: '4:3' })}
+              className={`px-1.5 py-0.5 rounded font-medium transition-colors ${
+                currentRatio === '4:3' ? 'bg-rose-500 text-white' : 'hover:bg-white/20 text-slate-200'
+              }`}
+              title="Tỷ lệ 4:3"
+            >
+              4:3
+            </button>
+            <button
+              type="button"
+              onClick={() => onUpdate({ height: '16:9' })}
+              className={`px-1.5 py-0.5 rounded font-medium transition-colors ${
+                currentRatio === '16:9' ? 'bg-rose-500 text-white' : 'hover:bg-white/20 text-slate-200'
+              }`}
+              title="Tỷ lệ 16:9"
+            >
+              16:9
+            </button>
+            <button
+              type="button"
+              onClick={() => onUpdate({ height: '1:1' })}
+              className={`px-1.5 py-0.5 rounded font-medium transition-colors ${
+                currentRatio === '1:1' ? 'bg-rose-500 text-white' : 'hover:bg-white/20 text-slate-200'
+              }`}
+              title="Tỷ lệ vuông 1:1"
+            >
+              1:1
+            </button>
+            {isCustomPx && (
+              <button
+                type="button"
+                onClick={() => onUpdate({ height: 'auto' })}
+                className="px-1.5 py-0.5 rounded font-medium text-amber-300 hover:bg-white/20 flex items-center gap-0.5"
+                title="Khôi phục về tỷ lệ tự động"
+              >
+                <span className="material-symbols-outlined text-[11px]">restart_alt</span>
+                <span>{imageHeight}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Drag Resize Handle (Bottom-Right) */}
+        <div
+          onMouseDown={handleMouseDownResize}
+          className="absolute bottom-2 right-2 w-6 h-6 rounded-lg bg-black/70 hover:bg-[#ff5167] text-white flex items-center justify-center cursor-ns-resize shadow-md backdrop-blur-md opacity-0 group-hover/colimg:opacity-100 transition-opacity z-20"
+          title="Kéo lên/xuống để chỉnh chiều cao ảnh"
+        >
+          <span className="material-symbols-outlined text-[14px]">height</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
-  const { createPost, updatePost, selectPost, setTemporaryPreviewPost, posts } = useBlog();
+  const { createPost, updatePost, selectPost, temporaryPreviewPost, setTemporaryPreviewPost, clearPreviewPost, posts } = useBlog();
   const { toast } = useToast();
   const fileInputRef = useRef(null);
   const videoFileInputRef = useRef(null);
   const coverFileInputRef = useRef(null);
+  const columnFileInputRef = useRef(null);
+  const replaceImageFileInputRef = useRef(null);
+  const [replaceTargetBlockId, setReplaceTargetBlockId] = useState(null);
+  const [columnUploadTarget, setColumnUploadTarget] = useState(null); // { blockId, side: 'left' | 'right' }
   const titleTextareaRef = useRef(null);
   const newCategoryInputRef = useRef(null);
   const [targetBlockIndex, setTargetBlockIndex] = useState(null);
@@ -267,14 +591,22 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     }
   };
 
-  // Helper to reliably detect cursor position & split point inside active block
+  // Helper to reliably detect cursor position, highlighted text & split point inside active block
   const captureCursorContext = () => {
     const selection = window.getSelection();
     let blockId = focusedBlockId;
     let splitData = null;
+    let selectedHtml = '';
 
     if (selection && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
+      if (!selection.isCollapsed) {
+        const cloned = range.cloneContents();
+        const tempDiv = document.createElement('div');
+        tempDiv.appendChild(cloned);
+        selectedHtml = tempDiv.innerHTML;
+      }
+
       let container = range.commonAncestorContainer;
       if (container && container.nodeType === Node.TEXT_NODE) {
         container = container.parentElement;
@@ -315,7 +647,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         ? lastActiveIndexRef.current
         : 0;
     }
-    return { blockId, blockIdx: idx, splitData };
+    return { blockId, blockIdx: idx, splitData, selectedHtml };
   };
 
   // Custom Prompt Modal State
@@ -364,20 +696,45 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   // Cover Image Upload State for Inline Black Card Loader
   const [coverUploadState, setCoverUploadState] = useState(null);
 
+  // Modals state
+  const [activeModal, setActiveModal] = useState(null); // 'link' | 'image' | 'video' | 'table'
+  const [promptValue, setPromptValue] = useState('');
+
   // Publish Success Modal State
   const [showPublishSuccessModal, setShowPublishSuccessModal] = useState(false);
   const [publishedPostInfo, setPublishedPostInfo] = useState(null);
   const [redirectCountdown, setRedirectCountdown] = useState(3);
 
+  // Compute effective post by prioritizing active preview working draft if available
+  const effectivePost = useMemo(() => {
+    if (temporaryPreviewPost) {
+      if (postToEdit) {
+        if (
+          temporaryPreviewPost.id === postToEdit.id ||
+          temporaryPreviewPost.originalPostId === postToEdit.id ||
+          temporaryPreviewPost.slug === postToEdit.slug
+        ) {
+          return { ...postToEdit, ...temporaryPreviewPost };
+        }
+      } else {
+        // New post preview draft
+        if (!temporaryPreviewPost.isEditingExisting || temporaryPreviewPost.id?.startsWith('preview-')) {
+          return temporaryPreviewPost;
+        }
+      }
+    }
+    return postToEdit;
+  }, [temporaryPreviewPost, postToEdit]);
+
   // Document State
-  const [title, setTitle] = useState(postToEdit?.title || '');
-  const [summary, setSummary] = useState(postToEdit?.summary || '');
-  const [category, setCategory] = useState(postToEdit?.category || 'Công nghệ & Kiến trúc phần mềm');
-  const [authorName, setAuthorName] = useState(postToEdit?.author?.name || 'Alex Vũ (Super Admin)');
-  const [coverImage, setCoverImage] = useState(postToEdit?.coverImage || '');
-  const [slug, setSlug] = useState(postToEdit?.slug || '');
-  const [metaDesc, setMetaDesc] = useState(postToEdit?.metaDesc || postToEdit?.summary || '');
-  const [tags, setTags] = useState(postToEdit?.tags || []);
+  const [title, setTitle] = useState(effectivePost?.title || '');
+  const [summary, setSummary] = useState(effectivePost?.summary || effectivePost?.sapo || '');
+  const [category, setCategory] = useState(effectivePost?.category || 'Công nghệ & Kiến trúc phần mềm');
+  const [authorName, setAuthorName] = useState(effectivePost?.authorName || effectivePost?.author?.name || 'Alex Vũ (Super Admin)');
+  const [coverImage, setCoverImage] = useState(effectivePost?.coverImage || '');
+  const [slug, setSlug] = useState(effectivePost?.slug || '');
+  const [metaDesc, setMetaDesc] = useState(effectivePost?.metaDesc || effectivePost?.summary || effectivePost?.sapo || '');
+  const [tags, setTags] = useState(effectivePost?.tags || []);
   const [newTagInput, setNewTagInput] = useState('');
 
   const [customCategories, setCustomCategories] = useState(() => {
@@ -406,10 +763,10 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     const set = new Set([
       ...fromPosts,
       ...customCategories,
-      ...(postToEdit?.category ? [postToEdit.category] : [])
+      ...(effectivePost?.category ? [effectivePost.category] : [])
     ]);
     return Array.from(set).sort();
-  }, [posts, customCategories, postToEdit]);
+  }, [posts, customCategories, effectivePost]);
 
   const handleAddCategory = () => {
     const trimmed = newCategoryName.trim();
@@ -429,8 +786,15 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
   // Initial Sequential Blocks
   const getInitialBlocks = () => {
-    if (postToEdit?.blocks && Array.isArray(postToEdit.blocks) && postToEdit.blocks.length > 0) {
-      return postToEdit.blocks.map((b) => {
+    if (effectivePost?.blocks && Array.isArray(effectivePost.blocks) && effectivePost.blocks.length > 0) {
+      return effectivePost.blocks.map((b) => {
+        if (b.type === 'columns') {
+          return {
+            ...b,
+            leftText: mdToHtml(cleanAlignTags(b.leftText || '')),
+            rightText: mdToHtml(cleanAlignTags(b.rightText || ''))
+          };
+        }
         let text = b.text || '';
         if (/<div align=/i.test(text)) {
           text = cleanAlignTags(text);
@@ -438,9 +802,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         return { ...b, text: mdToHtml(text) };
       });
     }
-    if (postToEdit?.content && Array.isArray(postToEdit.content)) {
+    if (effectivePost?.content && Array.isArray(effectivePost.content)) {
       const generated = [];
-      postToEdit.content.forEach((sec, idx) => {
+      effectivePost.content.forEach((sec, idx) => {
         if (sec.heading) {
           generated.push({ id: `h-${idx}-${Date.now()}`, type: 'heading', text: mdToHtml(cleanAlignTags(sec.heading)) });
         }
@@ -451,8 +815,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
           generated.push({ id: `q-${idx}-${Date.now()}`, type: 'quote', text: mdToHtml(cleanAlignTags(sec.quote)), author: sec.quoteAuthor || '' });
         }
       });
-      if (postToEdit.images && postToEdit.images.length > 0) {
-        postToEdit.images.forEach((img, imgIdx) => {
+      if (effectivePost.images && effectivePost.images.length > 0) {
+        effectivePost.images.forEach((img, imgIdx) => {
           generated.splice(Math.min(generated.length, (imgIdx + 1) * 2), 0, {
             id: img.id || `img-${imgIdx}`,
             type: 'image',
@@ -468,7 +832,11 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   };
 
   const [blocks, setBlocks] = useState(getInitialBlocks);
-  const [isPublic, setIsPublic] = useState(postToEdit ? postToEdit.status !== 'draft' : true);
+  const [isPublic, setIsPublic] = useState(
+    effectivePost?.isPublic !== undefined
+      ? effectivePost.isPublic
+      : (effectivePost ? effectivePost.status !== 'draft' : true)
+  );
   const [scheduleTime, setScheduleTime] = useState(
     new Date(Date.now() + 3600 * 1000 * 24).toISOString().slice(0, 16)
   );
@@ -549,7 +917,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
   }, [title, postToEdit, summary, metaDesc]);
 
   // Compute live word count & reading time
-  const fullText = `${title} ${summary} ${blocks.map((b) => b.text || '').join(' ')}`.replace(/<[^>]+>/g, '').trim();
+  const fullText = `${title} ${summary} ${blocks.map((b) => (b.type === 'columns' ? `${b.leftText || ''} ${b.rightText || ''}` : b.text || '')).join(' ')}`.replace(/<[^>]+>/g, '').trim();
   const wordCount = fullText ? fullText.split(/\s+/).filter(Boolean).length : 0;
   const readTimeMinutes = wordCount > 0 ? (wordCount / 200).toFixed(1) : '0';
   const headingsCount = blocks.filter((b) => b.type === 'heading').length;
@@ -698,6 +1066,12 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         if (inputRefs.current[b.id]) {
           inputRefs.current[b.id].innerHTML = b.text || '';
         }
+        if (inputRefs.current[`${b.id}-left`]) {
+          inputRefs.current[`${b.id}-left`].innerHTML = b.leftText || '';
+        }
+        if (inputRefs.current[`${b.id}-right`]) {
+          inputRefs.current[`${b.id}-right`].innerHTML = b.rightText || '';
+        }
       });
       updateToolbarActiveStates();
     }
@@ -714,6 +1088,12 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       snapshot.forEach((b) => {
         if (inputRefs.current[b.id]) {
           inputRefs.current[b.id].innerHTML = b.text || '';
+        }
+        if (inputRefs.current[`${b.id}-left`]) {
+          inputRefs.current[`${b.id}-left`].innerHTML = b.leftText || '';
+        }
+        if (inputRefs.current[`${b.id}-right`]) {
+          inputRefs.current[`${b.id}-right`].innerHTML = b.rightText || '';
         }
       });
       updateToolbarActiveStates();
@@ -1265,20 +1645,20 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       container.appendChild(range.cloneRange().extractContents());
 
       const lines = parseSelectedLines(container);
-      const isAlreadyBulleted = lines.every((l) => /^[•\-\*]\s*/.test(l.replace(/<[^>]+>/g, '').trim()));
+      const isAlreadyBulleted = lines.every((l) => /^[•\-\*]\s*/.test(l.replace(/<[^>]+>/g, '').trim()) || /<li\b/i.test(l));
 
       let resultHtml = '';
       if (isAlreadyBulleted) {
         resultHtml = lines
-          .map((l) => l.replace(/^([•\-\*]\s*)/, ''))
+          .map((l) => l.replace(/^([•\-\*]\s*)/, '').replace(/<\/?(li|ul|ol)[^>]*>/gi, ''))
           .join('<br>');
       } else {
-        resultHtml = lines
+        resultHtml = `<ul class="my-3 space-y-1.5 list-disc list-outside ml-6 sm:ml-8 pl-2 text-slate-800 dark:text-slate-200">${lines
           .map((l) => {
-            const clean = l.replace(/^([•\-\*]\s*|\d+[\.\)]\s*)/, '');
-            return `• ${clean}`;
+            const clean = l.replace(/^([•\-\*]\s*|\d+[\.\)]\s*)/, '').replace(/<\/?(li|ul|ol)[^>]*>/gi, '');
+            return `<li class="leading-relaxed pl-1">${clean}</li>`;
           })
-          .join('<br>');
+          .join('')}</ul>`;
       }
 
       const replacement = document.createElement('span');
@@ -1295,7 +1675,13 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       updateToolbarActiveStates();
       pushHistory(blocks);
     } else {
-      toast.info('Vui lòng bôi đen (tô đen) đoạn chữ cần thêm bullet');
+      const activeIdx = getActiveIndex();
+      insertBlockAt(activeIdx, {
+        id: `list-${Date.now()}`,
+        type: 'list',
+        listType: 'bullet',
+        items: ['']
+      });
     }
   };
 
@@ -1307,20 +1693,20 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       container.appendChild(range.cloneRange().extractContents());
 
       const lines = parseSelectedLines(container);
-      const isAlreadyNumbered = lines.every((l) => /^\d+[\.\)]\s*/.test(l.replace(/<[^>]+>/g, '').trim()));
+      const isAlreadyNumbered = lines.every((l) => /^\d+[\.\)]\s*/.test(l.replace(/<[^>]+>/g, '').trim()) || /<li\b/i.test(l));
 
       let resultHtml = '';
       if (isAlreadyNumbered) {
         resultHtml = lines
-          .map((l) => l.replace(/^\d+[\.\)]\s*/, ''))
+          .map((l) => l.replace(/^\d+[\.\)]\s*/, '').replace(/<\/?(li|ul|ol)[^>]*>/gi, ''))
           .join('<br>');
       } else {
-        resultHtml = lines
-          .map((l, idx) => {
-            const clean = l.replace(/^([•\-\*]\s*|\d+[\.\)]\s*)/, '');
-            return `${idx + 1}. ${clean}`;
+        resultHtml = `<ol class="my-3 space-y-1.5 list-decimal list-outside ml-6 sm:ml-8 pl-2 text-slate-800 dark:text-slate-200">${lines
+          .map((l) => {
+            const clean = l.replace(/^([•\-\*]\s*|\d+[\.\)]\s*)/, '').replace(/<\/?(li|ul|ol)[^>]*>/gi, '');
+            return `<li class="leading-relaxed pl-1">${clean}</li>`;
           })
-          .join('<br>');
+          .join('')}</ol>`;
       }
 
       const replacement = document.createElement('span');
@@ -1337,7 +1723,13 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       updateToolbarActiveStates();
       pushHistory(blocks);
     } else {
-      toast.info('Vui lòng bôi đen (tô đen) đoạn chữ cần đánh số thứ tự');
+      const activeIdx = getActiveIndex();
+      insertBlockAt(activeIdx, {
+        id: `list-${Date.now()}`,
+        type: 'list',
+        listType: 'numbered',
+        items: ['']
+      });
     }
   };
 
@@ -1667,6 +2059,360 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
     });
   };
 
+  const handleInsertColumns = (idx = null) => {
+    saveSelection();
+    const ctx = captureCursorContext();
+    const targetIdx = idx !== null ? idx : ctx.blockIdx;
+    const split = ctx.splitData && (ctx.splitData.beforeText || ctx.splitData.afterText) ? { blockId: ctx.blockId, ...ctx.splitData } : null;
+    const userSelectedText = ctx.selectedHtml && ctx.selectedHtml.trim() ? ctx.selectedHtml.trim() : '';
+
+    const activeIdx = targetIdx !== null ? targetIdx : getActiveIndex();
+    const nextParagraphId = `p-${Date.now() + 1}`;
+    const newColumnsBlock = {
+      id: `cols-${Date.now()}`,
+      type: 'columns',
+      layout: '50-50',
+      styleVariant: 'card',
+      leftType: 'text',
+      rightType: 'image',
+      leftTitle: '',
+      rightTitle: '',
+      leftText: userSelectedText || '',
+      rightText: '',
+      leftImageUrl: '',
+      leftImageCaption: '',
+      rightImageUrl: '',
+      rightImageCaption: ''
+    };
+
+    const afterText = split?.afterText || '';
+    const newParagraphBlock = {
+      id: nextParagraphId,
+      type: 'paragraph',
+      text: afterText === '<br>' || afterText === '<p><br></p>' ? '' : afterText
+    };
+
+    setBlocks((prev) => {
+      const newBlocks = [...prev];
+      const validIdx = activeIdx >= 0 && activeIdx < newBlocks.length ? activeIdx : Math.max(0, newBlocks.length - 1);
+
+      if (split && split.blockId && newBlocks[validIdx]?.id === split.blockId) {
+        const beforeText = split.beforeText || '';
+        newBlocks[validIdx] = {
+          ...newBlocks[validIdx],
+          text: beforeText === '<br>' || beforeText === '<p><br></p>' ? '' : beforeText
+        };
+      }
+
+      newBlocks.splice(validIdx + 1, 0, newColumnsBlock, newParagraphBlock);
+      pushHistory(newBlocks);
+      return newBlocks;
+    });
+
+    setFocusedBlockId(newColumnsBlock.id);
+    lastActiveIndexRef.current = (activeIdx >= 0 ? activeIdx : 0) + 2;
+  };
+
+  // Reusable unified image compression & upload helper
+  const processAndUploadFile = async (file, folder = 'dudi_blog/blocks') => {
+    try {
+      // 1. Client-side canvas compression to WebP to reduce file size by 80-90%
+      const { base64: base64Data, blob: compressedBlob } = await compressImageFile(file, {
+        maxWidth: 1600,
+        maxHeight: 1600,
+        quality: 0.85
+      });
+      let uploadedUrl = base64Data;
+
+      // 2. Upload to backend API
+      let uploadSuccess = false;
+      try {
+        const apiRes = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: base64Data,
+            folder
+          })
+        });
+
+        if (apiRes.ok) {
+          const apiData = await apiRes.json();
+          if (apiData.success && apiData.url) {
+            uploadedUrl = apiData.url;
+            uploadSuccess = true;
+          }
+        }
+      } catch (err) {
+        console.warn('Backend upload offline:', err);
+      }
+
+      // 3. Direct Cloudinary upload fallback if server API was not reached
+      if (!uploadSuccess) {
+        const cloudName = 'ai1z2oaj';
+        const uploadPreset = 'dudi_blog_preset';
+
+        if (cloudName && uploadPreset && uploadPreset !== 'YOUR_UPLOAD_PRESET') {
+          try {
+            const formData = new FormData();
+            formData.append('file', compressedBlob || file);
+            formData.append('upload_preset', uploadPreset);
+            formData.append('folder', folder);
+
+            const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+              method: 'POST',
+              body: formData
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (data.secure_url) {
+                uploadedUrl = data.secure_url;
+                uploadSuccess = true;
+              }
+            }
+          } catch (cloudErr) {
+            console.warn('[Cloudinary Upload Fallback]', cloudErr);
+          }
+        }
+      }
+      return uploadedUrl;
+    } catch (err) {
+      console.warn('Lỗi nén/upload ảnh:', err);
+      return null;
+    }
+  };
+
+  // Insert image file from paste event or drag-drop into editor canvas
+  const handleImageFileInsert = async (file, targetIdx = null, split = null) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    const fileName = file.name || `image-${Date.now()}.png`;
+    const tempBlockId = `img-${Date.now()}`;
+    const nextParagraphId = `p-${Date.now() + 1}`;
+
+    const activeIdx = targetIdx !== null ? targetIdx : (targetBlockIndexRef.current !== null ? targetBlockIndexRef.current : getActiveIndex());
+    targetBlockIndexRef.current = null;
+
+    const newImageBlock = {
+      id: tempBlockId,
+      type: 'image',
+      url: '',
+      caption: fileName,
+      uploading: true
+    };
+    const afterText = split?.afterText || '';
+    const newParagraphBlock = {
+      id: nextParagraphId,
+      type: 'paragraph',
+      text: afterText === '<br>' || afterText === '<p><br></p>' ? '' : afterText
+    };
+
+    setBlocks((prev) => {
+      const newBlocks = [...prev];
+      const validIdx = activeIdx >= 0 && activeIdx < newBlocks.length ? activeIdx : Math.max(0, newBlocks.length - 1);
+
+      if (split && split.blockId && newBlocks[validIdx]?.id === split.blockId) {
+        const beforeText = split.beforeText || '';
+        newBlocks[validIdx] = {
+          ...newBlocks[validIdx],
+          text: beforeText === '<br>' || beforeText === '<p><br></p>' ? '' : beforeText
+        };
+      }
+
+      newBlocks.splice(validIdx + 1, 0, newImageBlock, newParagraphBlock);
+      pushHistory(newBlocks);
+      return newBlocks;
+    });
+
+    setFocusedBlockId(nextParagraphId);
+    lastActiveIndexRef.current = (activeIdx >= 0 ? activeIdx : 0) + 2;
+
+    try {
+      const uploadedUrl = await processAndUploadFile(file, 'dudi_blog/blocks');
+      if (uploadedUrl) {
+        setBlocks((prev) => prev.map((b) => b.id === tempBlockId ? { ...b, uploading: false, url: uploadedUrl, caption: fileName } : b));
+        pushHistory(blocks);
+        toast.success('Đã dán và tải ảnh lên thành công!');
+      } else {
+        setBlocks((prev) => prev.filter((b) => b.id !== tempBlockId));
+        toast.error('Không thể xử lý ảnh được dán');
+      }
+    } catch (err) {
+      setBlocks((prev) => prev.filter((b) => b.id !== tempBlockId));
+      toast.error('Lỗi khi dán ảnh: ' + err.message);
+    }
+  };
+
+  // Handle column image file insertion (from file upload, drag-drop, or paste)
+  const handleColumnImageFile = async (file, blockId, side) => {
+    if (!file || !file.type.startsWith('image/')) {
+      toast.warning('Vui lòng chọn hoặc dán tệp hình ảnh hợp lệ');
+      return;
+    }
+
+    const sideKeyUrl = side === 'left' ? 'leftImageUrl' : 'rightImageUrl';
+    const sideKeyUploading = side === 'left' ? 'leftUploading' : 'rightUploading';
+    const sideKeyType = side === 'left' ? 'leftType' : 'rightType';
+    const sideKeyCaption = side === 'left' ? 'leftImageCaption' : 'rightImageCaption';
+
+    updateBlock(blockId, {
+      [sideKeyType]: 'image',
+      [sideKeyUploading]: true,
+      [sideKeyCaption]: file.name || 'Ảnh dán từ bộ nhớ tạm'
+    });
+
+    try {
+      const uploadedUrl = await processAndUploadFile(file, 'dudi_blog/blocks');
+      if (uploadedUrl) {
+        updateBlock(blockId, {
+          [sideKeyUrl]: uploadedUrl,
+          [sideKeyUploading]: false
+        });
+        pushHistory(blocks);
+        toast.success('Đã dán ảnh vào cột thành công!');
+      } else {
+        updateBlock(blockId, { [sideKeyUploading]: false });
+        toast.error('Không thể tải ảnh dán lên');
+      }
+    } catch (err) {
+      console.error('Lỗi tải ảnh cột:', err);
+      updateBlock(blockId, { [sideKeyUploading]: false });
+      toast.error('Không thể dán ảnh, vui lòng thử lại');
+    }
+  };
+
+  // Paste image directly from system clipboard into a column
+  const handlePasteFromClipboardToColumn = async (blockId, side) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        const clipboardItems = await navigator.clipboard.read();
+        for (const item of clipboardItems) {
+          const imageType = item.types.find((t) => t.startsWith('image/'));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            const file = new File([blob], `pasted-image-${Date.now()}.${imageType.split('/')[1] || 'png'}`, { type: imageType });
+            await handleColumnImageFile(file, blockId, side);
+            return;
+          }
+        }
+      }
+
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && (text.startsWith('http://') || text.startsWith('https://') || text.startsWith('data:image/'))) {
+          const sideKeyUrl = side === 'left' ? 'leftImageUrl' : 'rightImageUrl';
+          const sideKeyType = side === 'left' ? 'leftType' : 'rightType';
+          updateBlock(blockId, {
+            [sideKeyType]: 'image',
+            [sideKeyUrl]: text.trim()
+          });
+          pushHistory(blocks);
+          toast.success('Đã dán đường dẫn ảnh thành công!');
+          return;
+        }
+      }
+
+      toast.info('Hãy copy ảnh (hoặc chụp màn hình) rồi nhấn nút này hoặc nhấn Ctrl+V');
+    } catch (_) {
+      openPrompt({
+        title: 'Dán đường dẫn hoặc ảnh',
+        description: 'Nhập đường dẫn ảnh (URL) hoặc dán link ảnh:',
+        placeholder: 'https://images.unsplash.com/... hoặc link ảnh',
+        confirmText: 'Chèn ảnh',
+        icon: 'image',
+        iconColor: 'sky',
+        onConfirm: (url) => {
+          if (url && url.trim()) {
+            const sideKeyUrl = side === 'left' ? 'leftImageUrl' : 'rightImageUrl';
+            const sideKeyType = side === 'left' ? 'leftType' : 'rightType';
+            updateBlock(blockId, {
+              [sideKeyType]: 'image',
+              [sideKeyUrl]: url.trim()
+            });
+            pushHistory(blocks);
+            toast.success('Đã chèn ảnh thành công!');
+          }
+        }
+      });
+    }
+  };
+
+  // Paste image directly from system clipboard into a standalone image block
+  const handlePasteFromClipboardToBlock = async (blockId) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        const clipboardItems = await navigator.clipboard.read();
+        for (const item of clipboardItems) {
+          const imageType = item.types.find((t) => t.startsWith('image/'));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            const file = new File([blob], `pasted-image-${Date.now()}.${imageType.split('/')[1] || 'png'}`, { type: imageType });
+            updateBlock(blockId, { uploading: true });
+            const uploadedUrl = await processAndUploadFile(file, 'dudi_blog/blocks');
+            if (uploadedUrl) {
+              updateBlock(blockId, { url: uploadedUrl, caption: file.name, uploading: false });
+              pushHistory(blocks);
+              toast.success('Đã dán ảnh thành công!');
+            } else {
+              updateBlock(blockId, { uploading: false });
+              toast.error('Không thể tải ảnh dán lên');
+            }
+            return;
+          }
+        }
+      }
+
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text && (text.startsWith('http://') || text.startsWith('https://') || text.startsWith('data:image/'))) {
+          updateBlock(blockId, { url: text.trim() });
+          pushHistory(blocks);
+          toast.success('Đã dán đường dẫn ảnh thành công!');
+          return;
+        }
+      }
+
+      toast.info('Hãy copy ảnh (hoặc chụp màn hình) rồi nhấn nút này hoặc nhấn Ctrl+V');
+    } catch (_) {
+      openPrompt({
+        title: 'Dán đường dẫn ảnh',
+        description: 'Nhập đường dẫn ảnh (URL):',
+        placeholder: 'https://images.unsplash.com/...',
+        confirmText: 'Chèn ảnh',
+        icon: 'image',
+        iconColor: 'sky',
+        onConfirm: (url) => {
+          if (url && url.trim()) {
+            updateBlock(blockId, { url: url.trim() });
+            pushHistory(blocks);
+            toast.success('Đã cập nhật ảnh thành công!');
+          }
+        }
+      });
+    }
+  };
+
+  const triggerColumnImageUpload = (blockId, side) => {
+    setColumnUploadTarget({ blockId, side });
+    columnFileInputRef.current?.click();
+  };
+
+  const handleColumnImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !columnUploadTarget) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.warning('Vui lòng chọn tệp hình ảnh hợp lệ');
+      return;
+    }
+
+    const { blockId, side } = columnUploadTarget;
+    setColumnUploadTarget(null);
+    if (e.target) e.target.value = '';
+
+    await handleColumnImageFile(file, blockId, side);
+  };
+
   // Insert image directly into text/paragraph at cursor with caption and automatically add a new paragraph below for continued writing
   const insertImageAtCursor = (imageUrl, caption = '', targetIdx = null, split = null) => {
     const cleanCaption = caption || '';
@@ -1784,78 +2530,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       lastActiveIndexRef.current = (activeIdx >= 0 ? activeIdx : 0) + 2;
     }
 
-    // Parallel upload process
-    const uploadTask = async () => {
-      try {
-        // 1. Client-side canvas compression to WebP to reduce file size by 80-90% & accelerate uploads
-        const { base64: base64Data, blob: compressedBlob } = await compressImageFile(file, {
-          maxWidth: 1600,
-          maxHeight: 1600,
-          quality: 0.85
-        });
-        let uploadedUrl = base64Data;
-
-        // 2. Upload to Cloudinary via backend API
-        let uploadSuccess = false;
-        try {
-          const apiRes = await fetch('/api/upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              image: base64Data,
-              folder: isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks'
-            })
-          });
-
-          if (apiRes.ok) {
-            const apiData = await apiRes.json();
-            if (apiData.success && apiData.url) {
-              uploadedUrl = apiData.url;
-              uploadSuccess = true;
-            }
-          }
-        } catch (err) {
-          console.warn('Backend upload offline:', err);
-        }
-
-        // 3. Direct Cloudinary upload fallback if server API was not reached
-        if (!uploadSuccess) {
-          const cloudName = 'ai1z2oaj';
-          const uploadPreset = 'dudi_blog_preset';
-
-          if (cloudName && uploadPreset && uploadPreset !== 'YOUR_UPLOAD_PRESET') {
-            try {
-              const formData = new FormData();
-              formData.append('file', compressedBlob || file);
-              formData.append('upload_preset', uploadPreset);
-              formData.append('folder', isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks');
-
-              const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
-                method: 'POST',
-                body: formData
-              });
-
-              if (res.ok) {
-                const data = await res.json();
-                if (data.secure_url) {
-                  uploadedUrl = data.secure_url;
-                  uploadSuccess = true;
-                }
-              }
-            } catch (cloudErr) {
-              console.warn('[Cloudinary Upload Fallback]', cloudErr);
-            }
-          }
-        }
-        return uploadedUrl;
-      } catch (err) {
-        console.warn('Lỗi nén/upload ảnh:', err);
-        return null;
-      }
-    };
-
     try {
-      const uploadedUrl = await uploadTask();
+      const uploadedUrl = await processAndUploadFile(file, isCover ? 'dudi_blog/covers' : 'dudi_blog/blocks');
 
       if (uploadedUrl) {
         if (isCover) {
@@ -1881,9 +2557,79 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       if (isCover) {
         setTimeout(() => setCoverUploadState(null), 300);
       }
-      e.target.value = '';
+      if (e.target) e.target.value = '';
     }
   };
+
+  const triggerReplaceImage = (blockId) => {
+    setReplaceTargetBlockId(blockId);
+    replaceImageFileInputRef.current?.click();
+  };
+
+  const handleReplaceImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !replaceTargetBlockId) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.warning('Vui lòng chọn tệp hình ảnh hợp lệ');
+      return;
+    }
+
+    const targetId = replaceTargetBlockId;
+    setReplaceTargetBlockId(null);
+    updateBlock(targetId, { uploading: true });
+
+    try {
+      const uploadedUrl = await processAndUploadFile(file, 'dudi_blog/blocks');
+      if (uploadedUrl) {
+        updateBlock(targetId, {
+          url: uploadedUrl,
+          caption: file.name,
+          uploading: false
+        });
+        pushHistory(blocks);
+        toast.success('Đã cập nhật hình ảnh thành công!');
+      } else {
+        updateBlock(targetId, { uploading: false });
+        toast.error('Không thể cập nhật ảnh');
+      }
+    } catch (err) {
+      console.error('Lỗi thay đổi ảnh:', err);
+      updateBlock(targetId, { uploading: false });
+      toast.error('Không thể thay đổi hình ảnh');
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  // Global Paste Listener for pasting clipboard images/screenshots directly into editor
+  useEffect(() => {
+    const handleGlobalPaste = (e) => {
+      const activeEl = document.activeElement;
+      // Do not intercept if user is typing in standard inputs like title or category or URL inputs
+      if (activeEl && (activeEl.tagName === 'INPUT' || (activeEl.tagName === 'TEXTAREA' && !activeEl.getAttribute('data-block-id')))) {
+        return;
+      }
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          e.preventDefault();
+          const file = items[i].getAsFile();
+          if (file) {
+            const ctx = captureCursorContext();
+            handleImageFileInsert(file, ctx.blockIdx, ctx.splitData);
+          }
+          return;
+        }
+      }
+    };
+
+    window.addEventListener('paste', handleGlobalPaste);
+    return () => window.removeEventListener('paste', handleGlobalPaste);
+  }, [blocks, focusedBlockId]);
 
   const triggerVideoUploadAt = (idx) => {
     saveSelection();
@@ -2154,6 +2900,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         currentSection = { heading: block.text, text: '' };
       } else if (block.type === 'paragraph') {
         currentSection.text = currentSection.text ? `${currentSection.text}\n\n${block.text}` : block.text;
+      } else if (block.type === 'columns') {
+        const colContent = `${block.leftTitle ? `### ${block.leftTitle}\n` : ''}${block.leftText || ''}\n\n${block.rightTitle ? `### ${block.rightTitle}\n` : ''}${block.rightText || ''}`;
+        currentSection.text = currentSection.text ? `${currentSection.text}\n\n${colContent}` : colContent;
       } else if (block.type === 'quote') {
         currentSection.quote = block.text;
         currentSection.quoteAuthor = block.author || '';
@@ -2191,6 +2940,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         resultPost = await createPost(postData);
         toast.success(`Đã ${status === 'published' ? 'xuất bản' : 'lưu nháp'} bài viết "${title}" thành công!`);
       }
+      clearPreviewPost();
     } catch (err) {
       console.warn('Lỗi lưu bài viết:', err);
       resultPost = { id: `post-${Date.now()}`, ...postData };
@@ -2226,6 +2976,9 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
         currentSection = { heading: block.text, text: '' };
       } else if (block.type === 'paragraph') {
         currentSection.text = currentSection.text ? `${currentSection.text}\n\n${block.text}` : block.text;
+      } else if (block.type === 'columns') {
+        const colContent = `${block.leftTitle ? `### ${block.leftTitle}\n` : ''}${block.leftText || ''}\n\n${block.rightTitle ? `### ${block.rightTitle}\n` : ''}${block.rightText || ''}`;
+        currentSection.text = currentSection.text ? `${currentSection.text}\n\n${colContent}` : colContent;
       } else if (block.type === 'quote') {
         currentSection.quote = block.text;
         currentSection.quoteAuthor = block.author || '';
@@ -2240,6 +2993,8 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
     const previewData = {
       id: postToEdit?.id || `preview-${Date.now()}`,
+      isEditingExisting: Boolean(postToEdit),
+      originalPostId: postToEdit?.id || null,
       title,
       slug: targetSlug,
       category,
@@ -2250,7 +3005,10 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       blocks,
       coverImage: coverImage || firstImgBlock?.url || 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80&fm=webp',
       tags: tags.length > 0 ? tags : ['#DUDISoftware', '#Preview'],
-      status: postToEdit?.status || 'draft',
+      status: postToEdit?.status || (isPublic ? 'published' : 'draft'),
+      isPublic,
+      metaDesc,
+      authorName,
       author: {
         name: authorName.split(' (')[0],
         role: 'Tác giả',
@@ -2280,6 +3038,20 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       />
       <input
         type="file"
+        ref={replaceImageFileInputRef}
+        onChange={handleReplaceImageUpload}
+        accept="image/webp,image/png,image/jpeg,image/gif"
+        className="hidden"
+      />
+      <input
+        type="file"
+        ref={columnFileInputRef}
+        onChange={handleColumnImageUpload}
+        accept="image/webp,image/png,image/jpeg,image/gif"
+        className="hidden"
+      />
+      <input
+        type="file"
         ref={videoFileInputRef}
         onChange={handleVideoFileUpload}
         accept="video/mp4,video/webm,video/ogg,video/quicktime,video/*"
@@ -2297,7 +3069,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
       <div className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-2.5 bg-white/95 dark:bg-[#1a1426]/95 px-3 sm:px-6 py-2.5 sm:py-3 backdrop-blur-xl shadow-sm dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)] border-b border-slate-200 dark:border-[#352b48] transition-colors">
         {/* Breadcrumb */}
         <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
-          <nav className="flex items-center gap-1 text-slate-500 dark:text-[#ad8888] text-xs overflow-x-auto no-scrollbar whitespace-nowrap">
+          <nav className="flex items-center gap-1 text-slate-500 dark:text-[#ad8888] text-xs whitespace-nowrap">
             <button onClick={onExit} className="hover:text-rose-600 dark:hover:text-[#ffb3b5] transition-colors flex-shrink-0 font-medium">
               Quản trị
             </button>
@@ -2864,6 +3636,16 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
             <button
               onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertColumns()}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835] active:scale-95 transition-all"
+              title="Chèn văn bản song song 2 cột (Chèn văn bản cạnh đoạn văn)"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[17px]">view_column</span>
+            </button>
+
+            <button
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleInsertLink()}
               className={`w-7 h-7 flex items-center justify-center rounded-lg active:scale-95 transition-all ${isLinkActive ? 'bg-sky-100 dark:bg-[#4cd7f6]/25 text-sky-600 dark:text-[#4cd7f6] border border-sky-300 dark:border-[#4cd7f6]/40 shadow-sm' : 'text-slate-600 dark:text-[#ad8888] hover:text-sky-600 dark:hover:text-[#4cd7f6] hover:bg-slate-100 dark:hover:bg-[#2c2835]'}`}
               title="Chèn hoặc chỉnh sửa liên kết URL (Link)"
@@ -3047,6 +3829,10 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                           inputRef={(el) => (inputRefs.current[block.id] = el)}
                           html={block.text}
                           onChange={(val) => updateBlock(block.id, { text: val })}
+                          onPasteImage={(file) => {
+                            const ctx = captureCursorContext();
+                            handleImageFileInsert(file, ctx.blockIdx, ctx.splitData);
+                          }}
                           onFocus={() => {
                             setFocusedBlockId(block.id);
                             lastActiveIndexRef.current = idx;
@@ -3077,11 +3863,11 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
 
                     {/* Render Block: LIST */}
                     {block.type === 'list' && (
-                      <div className="my-3 pl-3 relative group/list">
-                        <div className="space-y-1.5">
+                      <div className="my-4 ml-6 sm:ml-8 pl-2 relative group/list border-l-2 border-[#ff5167]/30 pl-4 py-1">
+                        <div className="space-y-2">
                           {(block.items || []).map((item, itemIdx) => (
-                            <div key={itemIdx} className="flex items-center gap-2">
-                              <span className="text-[#ff5167] font-mono text-sm select-none font-bold">
+                            <div key={itemIdx} className="flex items-center gap-3">
+                              <span className="text-[#ff5167] font-mono text-base select-none font-bold min-w-[18px] text-center">
                                 {block.listType === 'numbered' ? `${itemIdx + 1}.` : '•'}
                               </span>
                               <input
@@ -3112,19 +3898,29 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                                   updateBlock(block.id, { items: newItems.length > 0 ? newItems : [''] });
                                 }}
                                 className="opacity-0 group-hover/list:opacity-100 text-slate-400 hover:text-rose-600 p-0.5 transition-opacity"
+                                title="Xóa dòng"
                               >
                                 <span className="material-symbols-outlined text-[14px]">close</span>
                               </button>
                             </div>
                           ))}
                         </div>
-                        <button
-                          onClick={() => updateBlock(block.id, { items: [...(block.items || []), ''] })}
-                          className="text-xs text-sky-600 dark:text-[#4cd7f6] hover:underline pt-1 flex items-center gap-1 font-semibold"
-                        >
-                          <span className="material-symbols-outlined text-[14px]">add</span>
-                          <span>Thêm dòng</span>
-                        </button>
+                        <div className="mt-2.5 flex items-center gap-4">
+                          <button
+                            onClick={() => updateBlock(block.id, { items: [...(block.items || []), ''] })}
+                            className="text-xs text-sky-600 dark:text-[#4cd7f6] hover:underline flex items-center gap-1 font-semibold"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">add</span>
+                            <span>Thêm dòng</span>
+                          </button>
+                          <button
+                            onClick={() => updateBlock(block.id, { listType: block.listType === 'numbered' ? 'bullet' : 'numbered' })}
+                            className="text-xs text-slate-500 dark:text-slate-400 hover:text-rose-500 flex items-center gap-1 font-medium"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">swap_horiz</span>
+                            <span>Đổi sang {block.listType === 'numbered' ? 'Gạch đầu dòng (•)' : 'Đánh số (1. 2.)'}</span>
+                          </button>
+                        </div>
                       </div>
                     )}
 
@@ -3265,7 +4061,7 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                       </div>
                     )}
 
-                    {/* Render Block: IN-LINE VISUAL IMAGE */}
+                    {/* Render Block: IN-LINE VISUAL IMAGE WITH RESIZING & ALIGNMENT */}
                     {block.type === 'image' && (
                       block.uploading ? (
                         <div className="my-5 max-w-3xl mx-auto">
@@ -3278,33 +4074,16 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                           />
                         </div>
                       ) : (
-                        <div className="my-5 max-w-3xl mx-auto relative group/img">
-                          <div className="relative overflow-hidden rounded-2xl bg-slate-100 dark:bg-[#100c18] shadow-md border border-slate-200 dark:border-white/10">
-                            <OptimizedImage
-                              src={block.url}
-                              alt={block.caption || 'Ảnh minh họa WebP'}
-                              sizes="(max-width: 768px) 100vw, 1000px"
-                              containerClassName="w-full max-h-[440px]"
-                              className="w-full max-h-[440px] object-cover rounded-2xl block mx-auto transition-transform duration-500 hover:scale-[1.005]"
-                            />
-                            <button
-                              onClick={() => deleteBlock(block.id)}
-                              className="absolute top-3 right-3 opacity-0 group-hover/img:opacity-100 p-1.5 rounded-xl bg-slate-900/80 text-rose-400 hover:bg-rose-600 hover:text-white backdrop-blur-md shadow-md transition-all active:scale-95 z-10"
-                              title="Xóa ảnh"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">delete</span>
-                            </button>
-                          </div>
-
-                          <div className="mt-2 text-center">
-                            <input
-                              value={block.caption || ''}
-                              onChange={(e) => updateBlock(block.id, { caption: e.target.value })}
-                              className="w-full text-center bg-transparent text-xs text-slate-500 dark:text-[#a898be] italic outline-none hover:text-slate-700 dark:hover:text-[#e8dff1] focus:text-sky-600 dark:focus:text-[#4cd7f6] transition-colors"
-                              placeholder="Nhập chú thích ảnh (.webp)..."
-                            />
-                          </div>
-                        </div>
+                        <ResizableImageBlock
+                          block={block}
+                          onUpdate={(newFields) => {
+                            updateBlock(block.id, newFields);
+                            pushHistory(blocks);
+                          }}
+                          onDelete={() => deleteBlock(block.id)}
+                          onReplace={() => triggerReplaceImage(block.id)}
+                          onPaste={() => handlePasteFromClipboardToBlock(block.id)}
+                        />
                       )
                     )}
 
@@ -3316,6 +4095,10 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                           inputRef={(el) => (inputRefs.current[block.id] = el)}
                           html={block.text}
                           onChange={(val) => updateBlock(block.id, { text: val })}
+                          onPasteImage={(file) => {
+                            const ctx = captureCursorContext();
+                            handleImageFileInsert(file, ctx.blockIdx, ctx.splitData);
+                          }}
                           onFocus={() => {
                             setFocusedBlockId(block.id);
                             lastActiveIndexRef.current = idx;
@@ -3367,6 +4150,473 @@ export default function AdminEditor({ postToEdit, onExit, onNavigate }) {
                         >
                           <span className="material-symbols-outlined text-[16px]">close</span>
                         </button>
+                      </div>
+                    )}
+
+                    {/* Render Block: COLUMNS (Side-by-side seamless Word-like layout: Text & Image / Text & Text) */}
+                    {block.type === 'columns' && (
+                      <div className="my-5 w-full relative group/cols py-2">
+                        {/* Word-like Floating/Hover Control Toolbar */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-3 border-b border-dashed border-slate-200 dark:border-white/10 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="flex items-center gap-1 font-semibold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-white/5 px-2 py-0.5 rounded-md text-[11px]">
+                              <span className="material-symbols-outlined text-[15px] text-sky-500">view_column</span>
+                              <span>Chia 2 cột song song</span>
+                            </span>
+
+                            {/* Ratio Selector */}
+                            <div className="flex items-center bg-slate-100 dark:bg-[#120d20] border border-slate-200 dark:border-white/10 rounded-lg p-0.5">
+                              <button
+                                type="button"
+                                onClick={() => updateBlock(block.id, { layout: '50-50' })}
+                                className={`px-2 py-0.5 text-[11px] rounded font-medium transition-all ${
+                                  (block.layout || '50-50') === '50-50'
+                                    ? 'bg-rose-500 text-white shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                }`}
+                                title="Chia đều 50% - 50%"
+                              >
+                                50:50
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateBlock(block.id, { layout: '60-40' })}
+                                className={`px-2 py-0.5 text-[11px] rounded font-medium transition-all ${
+                                  block.layout === '60-40'
+                                    ? 'bg-rose-500 text-white shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                }`}
+                                title="Trái 60% - Phải 40%"
+                              >
+                                60:40
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateBlock(block.id, { layout: '40-60' })}
+                                className={`px-2 py-0.5 text-[11px] rounded font-medium transition-all ${
+                                  block.layout === '40-60'
+                                    ? 'bg-rose-500 text-white shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                }`}
+                                title="Trái 40% - Phải 60%"
+                              >
+                                40:60
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateBlock(block.id, { layout: '70-30' })}
+                                className={`px-2 py-0.5 text-[11px] rounded font-medium transition-all ${
+                                  block.layout === '70-30'
+                                    ? 'bg-rose-500 text-white shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                }`}
+                                title="Trái 70% - Phải 30%"
+                              >
+                                70:30
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateBlock(block.id, { layout: '30-70' })}
+                                className={`px-2 py-0.5 text-[11px] rounded font-medium transition-all ${
+                                  block.layout === '30-70'
+                                    ? 'bg-rose-500 text-white shadow-xs'
+                                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                }`}
+                                title="Trái 30% - Phải 70%"
+                              >
+                                30:70
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            {/* Swap columns */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateBlock(block.id, {
+                                  leftType: block.rightType || 'text',
+                                  rightType: block.leftType || 'text',
+                                  leftTitle: block.rightTitle || '',
+                                  rightTitle: block.leftTitle || '',
+                                  leftText: block.rightText || '',
+                                  rightText: block.leftText || '',
+                                  leftImageUrl: block.rightImageUrl || '',
+                                  rightImageUrl: block.leftImageUrl || '',
+                                  leftImageCaption: block.rightImageCaption || '',
+                                  rightImageCaption: block.leftImageCaption || '',
+                                  leftImageHeight: block.rightImageHeight,
+                                  rightImageHeight: block.leftImageHeight
+                                });
+                                pushHistory(blocks);
+                              }}
+                              className="px-2 py-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-lg flex items-center gap-1 transition-colors"
+                              title="Hoán đổi nội dung cột trái và phải"
+                            >
+                              <span className="material-symbols-outlined text-[15px]">swap_horiz</span>
+                              <span className="text-[11px]">Đổi vị trí</span>
+                            </button>
+
+                            {/* Delete block */}
+                            <button
+                              type="button"
+                              onClick={() => deleteBlock(block.id)}
+                              className="p-1 text-slate-400 hover:text-rose-600 dark:text-[#ad8888] dark:hover:text-[#ff5167] rounded-lg transition-colors"
+                              title="Xóa khối song song"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">delete</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Columns Content Canvas (Seamless Word-like page integration) */}
+                        <div
+                          className={`grid gap-6 sm:gap-8 items-start ${
+                            block.layout === '60-40' || block.layout === '40-60' || block.layout === '70-30' || block.layout === '30-70'
+                              ? 'grid-cols-1 md:grid-cols-12'
+                              : 'grid-cols-1 md:grid-cols-2'
+                          }`}
+                        >
+                          {/* LEFT SIDE */}
+                          <div
+                            className={`flex flex-col gap-2 relative ${
+                              block.layout === '70-30'
+                                ? 'md:col-span-8'
+                                : block.layout === '30-70'
+                                ? 'md:col-span-4'
+                                : block.layout === '60-40'
+                                ? 'md:col-span-7'
+                                : block.layout === '40-60'
+                                ? 'md:col-span-5'
+                                : ''
+                            }`}
+                          >
+                            {/* Mode Toggle Header */}
+                            <div className="flex items-center justify-between pb-1 border-b border-slate-100 dark:border-white/5">
+                              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                                Cột trái
+                              </span>
+                              <div className="flex items-center gap-1 bg-slate-100 dark:bg-[#1f192d] p-0.5 rounded-lg border border-slate-200 dark:border-white/5 text-[11px]">
+                                <button
+                                  type="button"
+                                  onClick={() => updateBlock(block.id, { leftType: 'text' })}
+                                  className={`px-2 py-0.5 rounded font-semibold transition-all ${
+                                    (block.leftType || 'text') === 'text'
+                                      ? 'bg-rose-500 text-white shadow-xs'
+                                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                  }`}
+                                >
+                                  Văn bản
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateBlock(block.id, { leftType: 'image' })}
+                                  className={`px-2 py-0.5 rounded font-semibold transition-all ${
+                                    block.leftType === 'image'
+                                      ? 'bg-rose-500 text-white shadow-xs'
+                                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                  }`}
+                                >
+                                  Hình ảnh
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Left Side Content: TEXT */}
+                            {(block.leftType || 'text') === 'text' ? (
+                              <div className="space-y-1">
+                                <RichEditableBlock
+                                  blockId={`${block.id}-left`}
+                                  inputRef={(el) => (inputRefs.current[`${block.id}-left`] = el)}
+                                  html={block.leftText}
+                                  onChange={(val) => updateBlock(block.id, { leftText: val })}
+                                  onPasteImage={(file) => {
+                                    const ctx = captureCursorContext();
+                                    handleImageFileInsert(file, ctx.blockIdx, ctx.splitData);
+                                  }}
+                                  onFocus={() => {
+                                    setFocusedBlockId(block.id);
+                                    lastActiveIndexRef.current = idx;
+                                    updateToolbarActiveStates(block.id);
+                                  }}
+                                  onSelectionChange={() => {
+                                    lastActiveIndexRef.current = idx;
+                                    updateToolbarActiveStates(block.id);
+                                  }}
+                                  placeholder="Nhập nội dung văn bản cột trái..."
+                                  className="w-full min-h-[90px] bg-transparent text-slate-800 dark:text-[#f1eaff] text-base leading-relaxed outline-none py-1"
+                                />
+                              </div>
+                            ) : (
+                              /* Left Side Content: IMAGE */
+                              <div className="flex flex-col gap-2">
+                                {block.leftUploading ? (
+                                  <div className="h-44 flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-sky-400/60 bg-sky-50/50 dark:bg-sky-950/20">
+                                    <span className="material-symbols-outlined text-sky-500 animate-spin text-2xl">
+                                      progress_activity
+                                    </span>
+                                    <span className="text-xs text-sky-600 font-medium">Đang tối ưu & tải ảnh lên...</span>
+                                  </div>
+                                ) : block.leftImageUrl ? (
+                                  <ColumnImageResizable
+                                    imageUrl={block.leftImageUrl}
+                                    caption={block.leftImageCaption}
+                                    imageHeight={block.leftImageHeight}
+                                    onUpdate={(fields) => updateBlock(block.id, { leftImageHeight: fields.height })}
+                                    onUploadClick={() => triggerColumnImageUpload(block.id, 'left')}
+                                    onPasteClick={() => handlePasteFromClipboardToColumn(block.id, 'left')}
+                                    onDelete={() => updateBlock(block.id, { leftImageUrl: '' })}
+                                  />
+                                ) : (
+                                  <div
+                                    tabIndex={0}
+                                    onPaste={(e) => {
+                                      const items = e.clipboardData?.items;
+                                      if (items) {
+                                        for (let i = 0; i < items.length; i++) {
+                                          if (items[i].type.startsWith('image/')) {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            const file = items[i].getAsFile();
+                                            if (file) handleColumnImageFile(file, block.id, 'left');
+                                            return;
+                                          }
+                                        }
+                                      }
+                                      const text = e.clipboardData?.getData('text');
+                                      if (text && (text.startsWith('http://') || text.startsWith('https://') || text.startsWith('data:image/'))) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        updateBlock(block.id, { leftType: 'image', leftImageUrl: text.trim() });
+                                        pushHistory(blocks);
+                                        toast.success('Đã dán link ảnh thành công!');
+                                      }
+                                    }}
+                                    onDrop={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      const file = e.dataTransfer?.files?.[0];
+                                      if (file && file.type.startsWith('image/')) {
+                                        handleColumnImageFile(file, block.id, 'left');
+                                      }
+                                    }}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    className="min-h-[160px] p-4 flex flex-col items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed border-slate-300 dark:border-white/15 hover:border-sky-500 hover:bg-sky-50/30 dark:hover:bg-white/5 transition-all outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 group/colupload"
+                                  >
+                                    <span className="material-symbols-outlined text-3xl text-sky-500">
+                                      add_photo_alternate
+                                    </span>
+                                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 text-center">
+                                      Tải ảnh hoặc dán ảnh vào đây
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          triggerColumnImageUpload(block.id, 'left');
+                                        }}
+                                        className="px-2.5 py-1 bg-sky-500 hover:bg-sky-600 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm transition-all"
+                                      >
+                                        <span className="material-symbols-outlined text-[14px]">upload</span>
+                                        <span>Tải từ máy</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handlePasteFromClipboardToColumn(block.id, 'left');
+                                        }}
+                                        className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm transition-all"
+                                        title="Dán từ Clipboard (Ctrl+V)"
+                                      >
+                                        <span className="material-symbols-outlined text-[14px]">content_paste</span>
+                                        <span>Dán ảnh (Ctrl+V)</span>
+                                      </button>
+                                    </div>
+                                    <span className="text-[10px] text-slate-400">Kéo thả ảnh hoặc dán link ảnh</span>
+                                  </div>
+                                )}
+                                <input
+                                  value={block.leftImageCaption || ''}
+                                  onChange={(e) => updateBlock(block.id, { leftImageCaption: e.target.value })}
+                                  placeholder="Chú thích ảnh..."
+                                  className="w-full text-center bg-transparent text-xs text-slate-500 dark:text-[#a898be] italic outline-none"
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          {/* RIGHT SIDE */}
+                          <div
+                            className={`flex flex-col gap-2 relative ${
+                              block.layout === '70-30'
+                                ? 'md:col-span-4'
+                                : block.layout === '30-70'
+                                ? 'md:col-span-8'
+                                : block.layout === '60-40'
+                                ? 'md:col-span-5'
+                                : block.layout === '40-60'
+                                ? 'md:col-span-7'
+                                : ''
+                            }`}
+                          >
+                            {/* Mode Toggle Header */}
+                            <div className="flex items-center justify-between pb-1 border-b border-slate-100 dark:border-white/5">
+                              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                                Cột phải
+                              </span>
+                              <div className="flex items-center gap-1 bg-slate-100 dark:bg-[#1f192d] p-0.5 rounded-lg border border-slate-200 dark:border-white/5 text-[11px]">
+                                <button
+                                  type="button"
+                                  onClick={() => updateBlock(block.id, { rightType: 'text' })}
+                                  className={`px-2 py-0.5 rounded font-semibold transition-all ${
+                                    (block.rightType || 'text') === 'text'
+                                      ? 'bg-rose-500 text-white shadow-xs'
+                                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                  }`}
+                                >
+                                  Văn bản
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateBlock(block.id, { rightType: 'image' })}
+                                  className={`px-2 py-0.5 rounded font-semibold transition-all ${
+                                    block.rightType === 'image'
+                                      ? 'bg-rose-500 text-white shadow-xs'
+                                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                                  }`}
+                                >
+                                  Hình ảnh
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Right Side Content: TEXT */}
+                            {(block.rightType || 'text') === 'text' ? (
+                              <div className="space-y-1">
+                                <RichEditableBlock
+                                  blockId={`${block.id}-right`}
+                                  inputRef={(el) => (inputRefs.current[`${block.id}-right`] = el)}
+                                  html={block.rightText}
+                                  onChange={(val) => updateBlock(block.id, { rightText: val })}
+                                  onPasteImage={(file) => {
+                                    const ctx = captureCursorContext();
+                                    handleImageFileInsert(file, ctx.blockIdx, ctx.splitData);
+                                  }}
+                                  onFocus={() => {
+                                    setFocusedBlockId(block.id);
+                                    lastActiveIndexRef.current = idx;
+                                    updateToolbarActiveStates(block.id);
+                                  }}
+                                  onSelectionChange={() => {
+                                    lastActiveIndexRef.current = idx;
+                                    updateToolbarActiveStates(block.id);
+                                  }}
+                                  placeholder="Nhập nội dung văn bản bên cạnh..."
+                                  className="w-full min-h-[90px] bg-transparent text-slate-800 dark:text-[#f1eaff] text-base leading-relaxed outline-none py-1"
+                                />
+                              </div>
+                            ) : (
+                              /* Right Side Content: IMAGE */
+                              <div className="flex flex-col gap-2">
+                                {block.rightUploading ? (
+                                  <div className="h-44 flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-sky-400/60 bg-sky-50/50 dark:bg-sky-950/20">
+                                    <span className="material-symbols-outlined text-sky-500 animate-spin text-2xl">
+                                      progress_activity
+                                    </span>
+                                    <span className="text-xs text-sky-600 font-medium">Đang tối ưu & tải ảnh lên...</span>
+                                  </div>
+                                ) : block.rightImageUrl ? (
+                                  <ColumnImageResizable
+                                    imageUrl={block.rightImageUrl}
+                                    caption={block.rightImageCaption}
+                                    imageHeight={block.rightImageHeight}
+                                    onUpdate={(fields) => updateBlock(block.id, { rightImageHeight: fields.height })}
+                                    onUploadClick={() => triggerColumnImageUpload(block.id, 'right')}
+                                    onPasteClick={() => handlePasteFromClipboardToColumn(block.id, 'right')}
+                                    onDelete={() => updateBlock(block.id, { rightImageUrl: '' })}
+                                  />
+                                ) : (
+                                  <div
+                                    tabIndex={0}
+                                    onPaste={(e) => {
+                                      const items = e.clipboardData?.items;
+                                      if (items) {
+                                        for (let i = 0; i < items.length; i++) {
+                                          if (items[i].type.startsWith('image/')) {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            const file = items[i].getAsFile();
+                                            if (file) handleColumnImageFile(file, block.id, 'right');
+                                            return;
+                                          }
+                                        }
+                                      }
+                                      const text = e.clipboardData?.getData('text');
+                                      if (text && (text.startsWith('http://') || text.startsWith('https://') || text.startsWith('data:image/'))) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        updateBlock(block.id, { rightType: 'image', rightImageUrl: text.trim() });
+                                        pushHistory(blocks);
+                                        toast.success('Đã dán link ảnh thành công!');
+                                      }
+                                    }}
+                                    onDrop={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      const file = e.dataTransfer?.files?.[0];
+                                      if (file && file.type.startsWith('image/')) {
+                                        handleColumnImageFile(file, block.id, 'right');
+                                      }
+                                    }}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    className="min-h-[160px] p-4 flex flex-col items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed border-slate-300 dark:border-white/15 hover:border-sky-500 hover:bg-sky-50/30 dark:hover:bg-white/5 transition-all outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 group/colupload"
+                                  >
+                                    <span className="material-symbols-outlined text-3xl text-sky-500">
+                                      add_photo_alternate
+                                    </span>
+                                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 text-center">
+                                      Tải ảnh hoặc dán ảnh vào đây
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          triggerColumnImageUpload(block.id, 'right');
+                                        }}
+                                        className="px-2.5 py-1 bg-sky-500 hover:bg-sky-600 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm transition-all"
+                                      >
+                                        <span className="material-symbols-outlined text-[14px]">upload</span>
+                                        <span>Tải từ máy</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handlePasteFromClipboardToColumn(block.id, 'right');
+                                        }}
+                                        className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm transition-all"
+                                        title="Dán từ Clipboard (Ctrl+V)"
+                                      >
+                                        <span className="material-symbols-outlined text-[14px]">content_paste</span>
+                                        <span>Dán ảnh (Ctrl+V)</span>
+                                      </button>
+                                    </div>
+                                    <span className="text-[10px] text-slate-400">Kéo thả ảnh hoặc dán link ảnh</span>
+                                  </div>
+                                )}
+                                <input
+                                  value={block.rightImageCaption || ''}
+                                  onChange={(e) => updateBlock(block.id, { rightImageCaption: e.target.value })}
+                                  placeholder="Chú thích ảnh..."
+                                  className="w-full text-center bg-transparent text-xs text-slate-500 dark:text-[#a898be] italic outline-none"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     )}
 

@@ -66,6 +66,17 @@ html.light ::-webkit-scrollbar-thumb {
   background: #ff5167;
 }
 
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
 /* Rich Text WYSIWYG ContentEditable Styles */
 [contenteditable][data-placeholder]:empty:before,
 [contenteditable][data-placeholder][data-empty="true"]:before {
@@ -83,4 +94,58 @@ html.light [contenteditable][data-placeholder][data-empty="true"]:before {
 
 [contenteditable] {
   outline: none;
+}
+
+/* Ensure all lists & bullets are properly indented inside */
+[contenteditable] ul,
+article ul,
+.rich-content ul,
+.prose ul {
+  list-style-type: disc !important;
+  list-style-position: outside !important;
+  margin-left: 1.75rem !important;
+  padding-left: 0.5rem !important;
+  margin-top: 0.75rem !important;
+  margin-bottom: 0.75rem !important;
+}
+
+[contenteditable] ol,
+article ol,
+.rich-content ol,
+.prose ol {
+  list-style-type: decimal !important;
+  list-style-position: outside !important;
+  margin-left: 1.75rem !important;
+  padding-left: 0.5rem !important;
+  margin-top: 0.75rem !important;
+  margin-bottom: 0.75rem !important;
+}
+
+[contenteditable] li,
+article li,
+.rich-content li,
+.prose li {
+  padding-left: 0.25rem !important;
+  margin-bottom: 0.35rem !important;
+  line-height: 1.65 !important;
+}
+
+[contenteditable] ul ul,
+[contenteditable] ol ul,
+article ul ul,
+article ol ul {
+  list-style-type: circle !important;
+  margin-left: 1.5rem !important;
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+[contenteditable] ul ol,
+[contenteditable] ol ol,
+article ul ol,
+article ol ol {
+  list-style-type: lower-latin !important;
+  margin-left: 1.5rem !important;
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
 }

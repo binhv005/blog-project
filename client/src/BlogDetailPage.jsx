@@ -17,6 +17,7 @@ export default function BlogDetailPage({ onNavigate }) {
     selectPost, 
     activePost,
     isPreviewMode, 
+    temporaryPreviewPost,
     clearPreviewPost,
     togglePostStatus
   } = useBlog();
@@ -36,12 +37,13 @@ export default function BlogDetailPage({ onNavigate }) {
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
-                clearPreviewPost();
                 if (onNavigate) {
-                  if (activePost?.slug || activePost?.id) {
+                  if (temporaryPreviewPost?.isEditingExisting && (temporaryPreviewPost.originalPostId || temporaryPreviewPost.slug || temporaryPreviewPost.id)) {
+                    onNavigate('admin', `edit/${temporaryPreviewPost.slug || temporaryPreviewPost.originalPostId || temporaryPreviewPost.id}`);
+                  } else if (activePost && activePost.id && !activePost.id.startsWith('preview-')) {
                     onNavigate('admin', `edit/${activePost.slug || activePost.id}`);
                   } else {
-                    onNavigate('admin');
+                    onNavigate('admin', 'new');
                   }
                 }
               }}

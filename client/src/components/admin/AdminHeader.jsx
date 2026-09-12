@@ -1,5 +1,4 @@
 import React from 'react';
-import { useBlog } from '../../context/BlogContext';
 import { useToast } from '../../context/ToastContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -9,7 +8,6 @@ export default function AdminHeader({
   onSearchClick,
   onToggleSidebar
 }) {
-  const { isDatabaseConnected, refetchPosts } = useBlog();
   const { toast } = useToast();
   const { isDarkMode, toggleTheme } = useTheme();
 
@@ -30,20 +28,6 @@ export default function AdminHeader({
 
       {/* Right Header Actions */}
       <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
-        {/* Database Status Chip */}
-        <button
-          onClick={refetchPosts}
-          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-semibold transition-all border ${
-            isDatabaseConnected
-              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/20'
-              : 'bg-amber-500/10 text-amber-600 dark:text-amber-300 border-amber-500/25 hover:bg-amber-500/20'
-          }`}
-          title={isDatabaseConnected ? 'Đã kết nối MongoDB thành công! Nhấp để đồng bộ lại' : 'Đang ở chế độ Offline/Local Cache. Nhấp để kết nối lại MongoDB'}
-          type="button"
-        >
-          <span className={`w-2 h-2 rounded-full ${isDatabaseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-          <span>{isDatabaseConnected ? 'MongoDB Live' : 'Local Mode'}</span>
-        </button>
         {/* + Soạn bài mới CTA */}
         <button
           onClick={onNewPostClick}

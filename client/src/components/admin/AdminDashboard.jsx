@@ -40,7 +40,7 @@ const parseAdminRoute = (postsList = []) => {
 };
 
 export default function AdminDashboard({ onNavigate }) {
-  const { posts, updatePost } = useBlog();
+  const { posts, updatePost, clearPreviewPost, temporaryPreviewPost } = useBlog();
 
   const [activeTab, setActiveTab] = useState(() => parseAdminRoute(posts).activeTab);
   const [subView, setSubView] = useState(() => parseAdminRoute(posts).subView); // 'list', 'editor', 'overview'
@@ -141,10 +141,12 @@ export default function AdminDashboard({ onNavigate }) {
   }, [posts]);
 
   const handleEditPost = (post) => {
+    clearPreviewPost();
     navigateToSubRoute('editor', post);
   };
 
   const handleNewPost = () => {
+    clearPreviewPost();
     navigateToSubRoute('editor', null);
   };
 
@@ -168,9 +170,12 @@ export default function AdminDashboard({ onNavigate }) {
         {/* If in Editor Mode */}
         {subView === 'editor' ? (
           <AdminEditor 
-            key={editingPost ? (editingPost.id || editingPost.slug) : 'new-post'}
+            key={editingPost ? (editingPost.id || editingPost.slug) : (temporaryPreviewPost?.id || 'new-post')}
             postToEdit={editingPost}
-            onExit={() => navigateToSubRoute('list')}
+            onExit={() => {
+              clearPreviewPost();
+              navigateToSubRoute('list');
+            }}
             onNavigate={onNavigate}
           />
         ) : (
